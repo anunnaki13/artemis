@@ -20,7 +20,7 @@ services:
       context: ./frontend
       dockerfile: ../ops/docker/Dockerfile.frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      NEXT_PUBLIC_API_URL: http://103.150.197.225:8000/api
       NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws
     ports:
       - "3066:3000"

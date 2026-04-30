@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "postgresql+asyncpg://aiq:aiq@db:5432/aiq_db"
     redis_url: str = "redis://redis:6379/0"
+    cors_origins: str = "http://localhost:3066,http://127.0.0.1:3066,http://103.150.197.225:3066"
     jwt_secret: SecretStr = Field(default=SecretStr("dev-only-change-me"))
     jwt_expire_minutes: int = 15
     refresh_expire_days: int = 7
@@ -25,4 +26,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

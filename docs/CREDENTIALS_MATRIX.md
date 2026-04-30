@@ -18,7 +18,7 @@ This maps the v2 blueprint credentials that must be configured before paper/live
 | `BINANCE_API_SECRET` | Yes for paper/live | Request signing | Never display full value after save. |
 | `BINANCE_TESTNET` | Yes | Paper/test environment switch | `true` for testnet workflows. |
 | `BINANCE_VIP_TIER` | Yes | Fee model and net PnL | Default `0`. |
-| VPS public IP | Yes before live | Binance IP whitelist | Current VPS IP should be whitelisted. |
+| `BINANCE_WHITELISTED_IP` | Yes before live | Binance IP whitelist | Current VPS IP: `103.150.197.225`. |
 
 Hard rules from blueprint:
 
@@ -68,5 +68,6 @@ Hard rules from blueprint:
 
 ## Storage Rule
 
-Settings UI must not persist secrets to browser storage. The production path should save secrets server-side using Vault, Docker secrets, or age-encrypted sealed config, then only return masked values such as `sk_****abcd`.
+Settings UI must not persist secrets to browser storage. The current v2 foundation saves allowed settings server-side in `app_settings`, encrypts values before database persistence, and only returns masked values for secret fields such as `sk_****abcd`.
 
+Longer-term production hardening can replace or wrap this storage with Vault, Docker secrets, or age-encrypted sealed config.

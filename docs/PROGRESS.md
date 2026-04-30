@@ -42,6 +42,12 @@
   - `docs/CREDENTIALS_MATRIX.md`
 - Upgraded frontend look into a dense trading-terminal UI.
 - Added Settings UI for required blueprint credentials.
+- Added encrypted Settings Vault backend:
+  - `app_settings` table migration
+  - server-side Fernet encryption derived from `JWT_SECRET`
+  - masked settings read API
+  - settings update API with allowed-key whitelist
+  - frontend save form wired to `/api/settings`
 - Improved Login UI for owner email/password/TOTP.
 
 ### Validation
@@ -61,10 +67,10 @@ Phase 0 is partially complete and operational as a development foundation.
 Remaining before Phase 1:
 
 - Wire frontend login/register/TOTP flow to backend endpoints.
-- Add encrypted settings persistence for secrets.
-- Add masked settings read API.
+- Wire frontend Settings page to preload current masked values.
 - Expand database schema beyond `users` and `audit_log`.
 - Add session management and rate limiting.
+- Wire frontend login/register/TOTP flow to backend endpoints.
 
 ### Not Started Yet
 
@@ -76,4 +82,3 @@ Remaining before Phase 1:
 - Execution engine and order reconciliation.
 - AI Analyst backend integration.
 - Notification/recovery/dead-man services.
-
