@@ -12,7 +12,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Next.js app shell with all nine blueprint application routes.
 - Frontend owner register/login flow wired to backend auth endpoints, including TOTP enrollment output.
 - Redis-backed auth rate limits, JWT session registry, `/auth/me`, and `/auth/logout` foundation.
-- Frontend app route guard validates browser token through `/auth/me`.
+- Frontend app route guard validates the HttpOnly cookie session through `/auth/me`.
 - Binance public REST market-data ingestion for Spot symbols and candles.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
@@ -21,7 +21,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Partially Implemented
 
-- Authentication: register/login/TOTP enrollment, Redis-backed session checks, logout, rate limits, and frontend route guards are wired; refresh token rotation is pending.
+- Authentication: register/login/TOTP enrollment, Redis-backed session checks, HttpOnly access cookie, logout, rate limits, and frontend route guards are wired; refresh token rotation is pending.
 - Database schema: auth, settings, audit, and market-data foundation tables exist; full trading/execution schema from Section 12 is pending.
 - Settings Vault: encrypted persistence, masked reads, and frontend preload exist; connection testing is pending.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.

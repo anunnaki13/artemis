@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Copy, KeyRound, LockKeyhole, QrCode, ShieldCheck, UserPlus } from "lucide-react";
 
-import { loginOwner, registerOwner, storeAccessToken, type RegisterResponse } from "@/lib/api";
+import { loginOwner, registerOwner, type RegisterResponse } from "@/lib/api";
 
 type Mode = "login" | "register";
 type SubmitState = "idle" | "loading" | "success" | "error";
@@ -34,8 +34,7 @@ export function LoginForm() {
         return;
       }
 
-      const token = await loginOwner({ email, password, totp_code: totpCode });
-      storeAccessToken(token.access_token);
+      await loginOwner({ email, password, totp_code: totpCode });
       setState("success");
       setMessage("Authenticated. Redirecting to dashboard.");
       router.push("/dashboard");

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pyotp import TOTP
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.rate_limit import check_rate_limit, client_ip
 from app.core.security import (
     create_access_token,
@@ -18,7 +19,7 @@ from app.db import get_session
 from app.deps import get_current_user
 from app.models import User
 from app.redis import get_redis
-from app.schemas.auth import LoginRequest, RegisterRequest, RegisterResponse, TokenResponse, UserSessionResponse
+from app.schemas.auth import LoginRequest, RegisterRequest, RegisterResponse, UserSessionResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -54,13 +55,14 @@ async def register(
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=UserSessionResponse)
 async def login(
     payload: LoginRequest,
     request: Request,
+    response: Response,
     session: AsyncSession = Depends(get_session),
     redis: Redis = Depends(get_redis),
-) -> TokenResponse:
+) -> UserSessionResponse:
     ip_address = client_ip(request)
     await check_rate_limit(
         redis,
@@ -83,7 +85,17 @@ async def login(
 
     access_token = create_access_token(str(user.id))
     await store_access_session(redis, decode_access_token(access_token))
-    return TokenResponse(access_token=access_token)
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=access_token,
+        max_age=settings.jwt_expire_minutes * 60,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+    return UserSessionResponse(user_id=str(user.id), email=user.email, role=user.role)
 
 
 @router.get("/me", response_model=UserSessionResponse)
@@ -94,11 +106,17 @@ async def me(user: User = Depends(get_current_user)) -> UserSessionResponse:
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     request: Request,
+    response: Response,
     redis: Redis = Depends(get_redis),
 ) -> None:
+    settings = get_settings()
+    token = request.cookies.get(settings.auth_cookie_name)
     auth_header = request.headers.get("authorization", "")
-    scheme, _, token = auth_header.partition(" ")
-    if scheme.lower() != "bearer" or not token:
+    scheme, _, bearer_token = auth_header.partition(" ")
+    if scheme.lower() == "bearer" and bearer_token:
+        token = bearer_token
+    response.delete_cookie(key=settings.auth_cookie_name, path="/")
+    if not token:
         return
     try:
         payload = decode_access_token(token)

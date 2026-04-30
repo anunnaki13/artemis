@@ -15,11 +15,6 @@ export type RegisterResponse = {
   provisioning_uri: string;
 };
 
-export type TokenResponse = {
-  access_token: string;
-  token_type: string;
-};
-
 export type UserSessionResponse = {
   user_id: string;
   email: string;
@@ -61,36 +56,12 @@ export async function registerOwner(payload: RegisterPayload): Promise<RegisterR
   return response.json() as Promise<RegisterResponse>;
 }
 
-export async function loginOwner(payload: LoginPayload): Promise<TokenResponse> {
+export async function loginOwner(payload: LoginPayload): Promise<UserSessionResponse> {
   const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  if (!response.ok) {
-    throw new Error(await parseApiError(response));
-  }
-  return response.json() as Promise<TokenResponse>;
-}
-
-export function storeAccessToken(token: string) {
-  sessionStorage.setItem("aiq_access_token", token);
-  document.cookie = "aiq_session=1; path=/; max-age=900; samesite=lax";
-}
-
-export function getStoredAccessToken() {
-  return sessionStorage.getItem("aiq_access_token");
-}
-
-export function clearAccessToken() {
-  sessionStorage.removeItem("aiq_access_token");
-  document.cookie = "aiq_session=; path=/; max-age=0; samesite=lax";
-}
-
-export async function getCurrentUser(token: string): Promise<UserSessionResponse> {
-  const response = await fetch(`${API_URL}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store"
+    body: JSON.stringify(payload),
+    credentials: "include"
   });
   if (!response.ok) {
     throw new Error(await parseApiError(response));
@@ -98,10 +69,20 @@ export async function getCurrentUser(token: string): Promise<UserSessionResponse
   return response.json() as Promise<UserSessionResponse>;
 }
 
-export async function logoutOwner(token: string) {
+export async function getCurrentUser(): Promise<UserSessionResponse> {
+  const response = await fetch(`${API_URL}/auth/me`, {
+    cache: "no-store",
+    credentials: "include"
+  });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+  return response.json() as Promise<UserSessionResponse>;
+}
+
+export async function logoutOwner() {
   await fetch(`${API_URL}/auth/logout`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` }
+    credentials: "include"
   });
-  clearAccessToken();
 }

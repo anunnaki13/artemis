@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3066,http://127.0.0.1:3066,http://103.150.197.225:3066"
     jwt_secret: SecretStr = Field(default=SecretStr("dev-only-change-me"))
     jwt_expire_minutes: int = 15
+    auth_cookie_secure: bool = False
+    auth_cookie_name: str = "aiq_access_token"
     refresh_expire_days: int = 7
     risk_policy_path: str = "./config/risk_policy.yaml"
     prometheus_enabled: bool = True

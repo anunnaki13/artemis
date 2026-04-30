@@ -8,7 +8,7 @@
   - owner registration posts to `/api/auth/register`
   - login posts to `/api/auth/login`
   - registration displays TOTP secret and provisioning URI for authenticator enrollment
-  - successful login stores the short-lived access token in browser session storage
+  - successful login stores the short-lived access token in an HttpOnly backend cookie
 - Wired Settings page to preload backend configuration status:
   - configured/empty status is shown per field
   - non-secret values preload into inputs
@@ -23,6 +23,9 @@
   - `/api/auth/me` session validation endpoint
   - `/api/auth/logout` session revocation endpoint
 - Wired app route guard to `/api/auth/me` so protected pages redirect to login when the browser token is missing or invalid.
+- Updated auth storage for blueprint v2.1 compliance:
+  - removed browser `sessionStorage` token persistence
+  - frontend auth requests use credentialed HttpOnly cookies
 - Added Binance public REST ingestion foundation:
   - `/api/market-data/symbols/sync` syncs Binance Spot symbol metadata and filters
   - `/api/market-data/symbols` reads persisted symbols

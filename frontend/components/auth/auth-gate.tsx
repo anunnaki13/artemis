@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { clearAccessToken, getCurrentUser, getStoredAccessToken } from "@/lib/api";
+import { getCurrentUser } from "@/lib/api";
 
 type AuthState = "checking" | "authenticated" | "anonymous";
 
@@ -12,16 +12,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>("checking");
 
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
-
-    void getCurrentUser(token)
+    void getCurrentUser()
       .then(() => setState("authenticated"))
       .catch(() => {
-        clearAccessToken();
         setState("anonymous");
         router.replace("/login");
       });
