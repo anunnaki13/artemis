@@ -23,10 +23,16 @@
   - `/api/auth/me` session validation endpoint
   - `/api/auth/logout` session revocation endpoint
 - Wired app route guard to `/api/auth/me` so protected pages redirect to login when the browser token is missing or invalid.
+- Added Binance public REST ingestion foundation:
+  - `/api/market-data/symbols/sync` syncs Binance Spot symbol metadata and filters
+  - `/api/market-data/symbols` reads persisted symbols
+  - `/api/market-data/candles/ingest` ingests Binance kline/candlestick batches
+  - `/api/market-data/candles` reads persisted candles
 
 ### Validation
 
 - `make test` passed.
+- `make lint` passed.
 - `npm run lint` passed.
 - `npm run typecheck` passed.
 - `npm run build` passed.

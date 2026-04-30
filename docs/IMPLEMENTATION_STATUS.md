@@ -13,6 +13,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Frontend owner register/login flow wired to backend auth endpoints, including TOTP enrollment output.
 - Redis-backed auth rate limits, JWT session registry, `/auth/me`, and `/auth/logout` foundation.
 - Frontend app route guard validates browser token through `/auth/me`.
+- Binance public REST market-data ingestion for Spot symbols and candles.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
@@ -29,7 +30,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Not Implemented Yet
 
-- Binance REST/WebSocket market data service.
+- Binance WebSocket market data service.
 - Candle aggregation, orderbook delta sync, funding/open-interest polling.
 - Strategy registry, baseline strategies, and microstructure strategies.
 - Backtest engine, walk-forward validation, Monte Carlo, sensitivity, Deflated Sharpe.
@@ -42,4 +43,4 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Next Blueprint Gate
 
-Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Next implementation step is Binance public market-data ingestion.
+Phase 1 has started with Binance public REST ingestion. Next implementation step is Binance WebSocket streaming and candle aggregation.
