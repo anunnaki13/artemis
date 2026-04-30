@@ -3,8 +3,9 @@ from decimal import Decimal
 from fastapi import APIRouter, Query
 
 from app.config import get_settings
-from app.schemas.risk import CapitalProfileResponse
+from app.schemas.risk import CapitalProfileResponse, SignalRiskEvaluateRequest, SignalRiskEvaluateResponse
 from services.risk.capital_profile import CapitalProfileManager
+from services.risk.signal_gate import SignalRiskGate, SignalRiskInput
 
 router = APIRouter(prefix="/risk", tags=["risk"])
 
@@ -30,3 +31,32 @@ async def capital_profile(
     settings = get_settings()
     manager = CapitalProfileManager(settings.capital_profiles_path)
     return manager.evaluate(current_equity)
+
+
+@router.post("/evaluate-signal", response_model=SignalRiskEvaluateResponse)
+async def evaluate_signal(payload: SignalRiskEvaluateRequest) -> SignalRiskEvaluateResponse:
+    settings = get_settings()
+    manager = CapitalProfileManager(settings.capital_profiles_path)
+    capital_profile = manager.evaluate(payload.current_equity)
+    decision = SignalRiskGate().evaluate(
+        SignalRiskInput(
+            signal=payload.signal,
+            current_equity=payload.current_equity,
+            entry_price=payload.entry_price,
+            proposed_notional=payload.proposed_notional,
+            current_open_positions=payload.current_open_positions,
+            daily_pnl_pct=payload.daily_pnl_pct,
+            leverage=payload.leverage,
+            quote_volume_usd=payload.quote_volume_usd,
+            use_futures=payload.use_futures,
+        ),
+        capital_profile,
+    )
+    return SignalRiskEvaluateResponse(
+        allowed=decision.allowed,
+        reasons=decision.reasons,
+        profile_name=decision.profile_name,
+        recommended_max_notional=decision.recommended_max_notional,
+        recommended_risk_amount=decision.recommended_risk_amount,
+        computed_r_multiple=decision.computed_r_multiple,
+    )

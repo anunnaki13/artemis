@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from strategies.base import Signal
+
 UseFutures = bool | Literal["optional"]
 
 
@@ -35,3 +37,24 @@ class CapitalProfileResponse(BaseModel):
     active_profile: CapitalProfileRead
     fee_strategy: FeeStrategyRead
     enforcement_notes: list[str]
+
+
+class SignalRiskEvaluateRequest(BaseModel):
+    signal: Signal
+    current_equity: Decimal
+    entry_price: Decimal
+    proposed_notional: Decimal
+    current_open_positions: int = 0
+    daily_pnl_pct: Decimal = Decimal("0")
+    leverage: Decimal = Decimal("1")
+    quote_volume_usd: Decimal | None = None
+    use_futures: bool = False
+
+
+class SignalRiskEvaluateResponse(BaseModel):
+    allowed: bool
+    reasons: list[str]
+    profile_name: str
+    recommended_max_notional: Decimal
+    recommended_risk_amount: Decimal
+    computed_r_multiple: Decimal | None

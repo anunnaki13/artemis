@@ -45,11 +45,82 @@
   - `config/edge/blacklist.yaml`
   - `/api/edge/universe/refresh` filters Binance 24h tickers into the mid-cap universe
   - unit tests cover blacklist, volume filter, stablecoin base exclusion, and ranking
+- Added Binance WebSocket streaming foundation:
+  - configurable Binance combined-stream base URL
+  - owner-protected `/api/market-data/stream/start`, `/stop`, and `/status` endpoints
+  - streaming service persists live kline updates into `candles`
+  - mini-ticker and book-ticker events persist into `market_snapshots`
+  - shutdown hook stops the stream task cleanly
+- Extended market-data streaming with microstructure and futures snapshots:
+  - combined stream now includes `@depth@100ms` orderbook delta events
+  - funding-rate snapshots poll from Binance Futures premium index
+  - open-interest snapshots poll from Binance Futures open-interest endpoint
+  - stream status now reports polling cycles in addition to websocket message counts
+- Added in-memory orderbook reconstruction and liquidity metrics:
+  - bootstraps Binance REST depth snapshots before applying live deltas
+  - maintains per-symbol bid/ask ladders from websocket depth updates
+  - computes spread, spread bps, 0.5% depth notionals, and imbalance ratio
+  - owner-protected `/api/market-data/orderbook/{symbol}` exposes current ladder and metrics
+- Hardened market-data backend around orderbook continuity:
+  - depth sequence gaps now trigger a per-symbol REST rebootstrap instead of leaving stale state
+  - added `/api/market-data/liquidity/{symbol}/latest` for the newest persisted liquidity metrics
+  - added `/api/market-data/liquidity/{symbol}/history` for recent persisted liquidity metric points
+- Added dedicated historical orderbook snapshot persistence:
+  - new `orderbook_snapshots` table with ladder slices plus derived metrics
+  - stream service persists top-of-book ladder snapshots on a configurable interval
+  - added `/api/market-data/orderbook/{symbol}/snapshots` for historical ladder reads
+- Started consuming orderbook metrics in the strategy layer:
+  - implemented `orderbook_imbalance` strategy evaluation against persisted orderbook snapshots
+  - added owner-protected `/api/strategies/orderbook-imbalance/evaluate`
+  - diagnostics include persistence ratio, average imbalance, spread, and depth checks
+- Added backend risk gating for strategy signals:
+  - implemented signal evaluation against capital profile and hard risk limits
+  - added `/api/risk/evaluate-signal`
+  - gate checks position size, leverage, daily loss, forbidden strategies, futures eligibility, liquidity floor, and target R
+- Added execution-intent queue and audit persistence:
+  - new `execution_intents` table for queued/approved/rejected/cancelled/executed intents
+  - added `/api/execution/intents/submit`, list, and status-update endpoints
+  - signal submission reuses risk gating before queue insertion
+  - audit log now records intent creation and status transitions
+- Added execution lifecycle worker stub:
+  - intents now carry `dispatched_at`, `executed_at`, and `execution_payload`
+  - added `/api/execution/worker/dispatch-next` to process the oldest approved intent
+  - paper execution adapter simulates fills and advances intent state through `dispatching` to `executed`
+- Added reconciliation and timeout handling for execution lifecycle:
+  - added `/api/execution/intents/{intent_id}/reconcile` for explicit execution reports
+  - added `/api/execution/worker/fail-stale` to fail timed-out `dispatching` intents
+  - configurable dispatch timeout now protects the queue from stuck lifecycle state
+- Added stable execution adapter contract and order identifiers:
+  - intents now persist `client_order_id`, `venue_order_id`, and `execution_venue`
+  - worker dispatch path records accepted venue metadata before final execution result
+  - paper adapter now follows the same dispatch/execute contract intended for future venue adapters
+- Added order-id-based lookup and reconciliation:
+  - added `/api/execution/intents/by-order-id`
+  - added `/api/execution/reconcile/by-order-id`
+  - backend can now close execution intents from venue-facing identifiers instead of only internal intent ids
+- Added stubbed Binance venue adapter contract:
+  - explicit Binance order request builder with HMAC signing path
+  - transport abstraction separates request construction from venue I/O
+  - worker now awaits adapter dispatch/execute, making future live adapters a drop-in replacement
+- Added authenticated Binance runtime resolution and request preview:
+  - runtime loader now reads Binance execution credentials and testnet/base-url flags from settings vault
+  - added `/api/execution/venues/binance/intents/{intent_id}/preview-order`
+  - preview path validates request construction and signing inputs without placing live orders
+- Added runtime-selected execution transport gating:
+  - worker now chooses paper, stubbed Binance, or authenticated Binance transport per request
+  - authenticated Binance transport is only selected when live mode and vault/runtime flag explicitly enable it
+  - venue HTTP failures are persisted as failed execution lifecycle events with raw response payload
+- Added feed-driven execution reconciliation and raw venue event persistence:
+  - new `execution_venue_events` table stores raw asynchronous venue order/fill updates
+  - added `/api/execution/venues/events/ingest` for owner-controlled venue event ingestion
+  - async venue statuses now map into lifecycle transitions for `FILLED`, `CANCELED`, `REJECTED`, and related terminal states
+  - non-terminal updates such as `PARTIALLY_FILLED` persist on the intent as live execution progress without prematurely closing the lifecycle
 
 ### Validation
 
 - `make test` passed.
 - `make lint` passed.
+- `make typecheck` passed.
 - `npm run lint` passed.
 - `npm run typecheck` passed.
 - `npm run build` passed.

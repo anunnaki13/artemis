@@ -18,3 +18,20 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     before_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     after_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+def serialize_audit_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): serialize_audit_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [serialize_audit_value(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return serialize_audit_value(value.model_dump())
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except TypeError:
+            pass
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)

@@ -14,6 +14,23 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Redis-backed auth rate limits, JWT session registry, `/auth/me`, and `/auth/logout` foundation.
 - Frontend app route guard validates the HttpOnly cookie session through `/auth/me`.
 - Binance public REST market-data ingestion for Spot symbols and candles.
+- Binance WebSocket market-data streaming foundation with owner-controlled start/stop/status endpoints.
+- Orderbook top-of-book snapshots from Binance depth-delta streams.
+- Funding-rate and open-interest polling snapshots from Binance Futures public endpoints.
+- In-memory orderbook ladder reconstruction with derived spread, imbalance, and 0.5% liquidity-depth metrics.
+- Depth-gap recovery by per-symbol orderbook rebootstrap, plus persisted liquidity-metric read endpoints.
+- Dedicated `orderbook_snapshots` persistence for historical ladder slices and derived metrics.
+- Initial strategy-layer consumption of orderbook metrics through `orderbook_imbalance` evaluation.
+- Initial risk-layer consumption of strategy signals through capital-profile and hard-limit gating.
+- Execution-intent queue with audit persistence for signals that pass the risk gate.
+- Execution lifecycle worker stub with paper adapter and dispatch/execution state transitions.
+- Reconciliation endpoint and stale-dispatch timeout sweep for execution lifecycle control.
+- Stable execution adapter contract with persisted client/venue order identifiers.
+- Order-id-based lookup and reconciliation for venue-facing lifecycle events.
+- Stubbed Binance execution adapter contract with transport abstraction and signed order-request builder.
+- Runtime Binance credential resolution and safe signed-order preview endpoint.
+- Runtime-selected execution transport gating with authenticated Binance path guarded behind explicit enablement.
+- Feed-driven execution reconciliation with persisted raw venue events and async venue-status mapping.
 - Capital Profile Manager with v2.1 MICRO/SMALL/STANDARD/SCALED rules and growth-plan config.
 - Telegram notification skeleton with protected test endpoint and encrypted settings lookup.
 - Symbol Universe Manager foundation with Binance 24h ticker filtering and blacklist enforcement.
@@ -36,8 +53,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 
 ## Not Implemented Yet
 
-- Binance WebSocket market data service.
-- Candle aggregation, orderbook delta sync, funding/open-interest polling.
+- Candle aggregation and snapshot persistence exist for Binance kline, mini-ticker, book-ticker, depth-delta, funding-rate, and open-interest feeds; orderbook ladders are reconstructed in memory, liquidity metrics are exposed both live and from recent persisted snapshots, and dedicated orderbook snapshot history is now persisted, while full unthrottled ladder persistence is still pending.
 - Strategy registry, baseline strategies, and microstructure strategies.
 - Backtest engine, walk-forward validation, Monte Carlo, sensitivity, Deflated Sharpe.
 - Execution engine, idempotent order placement, fill reconciliation, SL/TP manager.
@@ -49,4 +65,4 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 
 ## Next Blueprint Gate
 
-Phase 1 has started with Binance public REST ingestion. Next implementation step is Binance WebSocket streaming and candle aggregation.
+Phase 1 now includes Binance REST, WebSocket ingestion, futures market-context polling, in-memory orderbook reconstruction, persisted liquidity-metric reads, historical orderbook snapshot storage, initial strategy consumption of orderbook metrics, signal risk gating, execution-intent queue persistence, a paper dispatch worker stub, lifecycle reconciliation/timeout control, a stable execution adapter contract with order identifiers, order-id-based reconciliation, a stubbed/authenticated Binance adapter path, safe authenticated request preview, runtime transport gating, and feed-driven async reconciliation with raw venue-event persistence. Next implementation step is venue-native consumers or webhooks that feed this ingestion path automatically instead of manual/event-proxy submission.
