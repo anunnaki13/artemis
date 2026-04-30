@@ -22,3 +22,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+
+class UserSessionResponse(BaseModel):
+    user_id: str
+    email: EmailStr
+    role: str

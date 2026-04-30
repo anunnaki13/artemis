@@ -11,6 +11,8 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Argon2 password hashing and TOTP verification helpers.
 - Next.js app shell with all nine blueprint application routes.
 - Frontend owner register/login flow wired to backend auth endpoints, including TOTP enrollment output.
+- Redis-backed auth rate limits, JWT session registry, `/auth/me`, and `/auth/logout` foundation.
+- Frontend app route guard validates browser token through `/auth/me`.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
@@ -18,7 +20,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Partially Implemented
 
-- Authentication: register/login/TOTP enrollment is wired; refresh tokens, Redis-backed sessions, route guards, and rate limiting are pending.
+- Authentication: register/login/TOTP enrollment, Redis-backed session checks, logout, rate limits, and frontend route guards are wired; refresh token rotation is pending.
 - Database schema: auth, settings, audit, and market-data foundation tables exist; full trading/execution schema from Section 12 is pending.
 - Settings Vault: encrypted persistence, masked reads, and frontend preload exist; connection testing is pending.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.
@@ -40,4 +42,4 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Next Blueprint Gate
 
-Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Before Phase 1, add session/rate-limit hardening, then implement Binance public market-data ingestion.
+Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Next implementation step is Binance public market-data ingestion.

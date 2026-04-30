@@ -20,6 +20,12 @@ export type TokenResponse = {
   token_type: string;
 };
 
+export type UserSessionResponse = {
+  user_id: string;
+  email: string;
+  role: string;
+};
+
 async function parseApiError(response: Response) {
   try {
     const payload = (await response.json()) as { detail?: unknown };
@@ -70,4 +76,32 @@ export async function loginOwner(payload: LoginPayload): Promise<TokenResponse> 
 export function storeAccessToken(token: string) {
   sessionStorage.setItem("aiq_access_token", token);
   document.cookie = "aiq_session=1; path=/; max-age=900; samesite=lax";
+}
+
+export function getStoredAccessToken() {
+  return sessionStorage.getItem("aiq_access_token");
+}
+
+export function clearAccessToken() {
+  sessionStorage.removeItem("aiq_access_token");
+  document.cookie = "aiq_session=; path=/; max-age=0; samesite=lax";
+}
+
+export async function getCurrentUser(token: string): Promise<UserSessionResponse> {
+  const response = await fetch(`${API_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+  return response.json() as Promise<UserSessionResponse>;
+}
+
+export async function logoutOwner(token: string) {
+  await fetch(`${API_URL}/auth/logout`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  clearAccessToken();
 }

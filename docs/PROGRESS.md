@@ -17,6 +17,12 @@
   - `symbols` table for Binance symbol filters and status
   - `candles` table for OHLCV ingestion
   - `market_snapshots` table for ticker/orderbook/funding/open-interest snapshots
+- Added auth hardening foundation:
+  - Redis-backed login/register rate limits
+  - access-token session registry keyed by JWT `jti`
+  - `/api/auth/me` session validation endpoint
+  - `/api/auth/logout` session revocation endpoint
+- Wired app route guard to `/api/auth/me` so protected pages redirect to login when the browser token is missing or invalid.
 
 ### Validation
 
@@ -91,7 +97,7 @@ Phase 0 is partially complete and operational as a development foundation.
 
 Remaining before Phase 1:
 
-- Add session management and rate limiting.
+- Add refresh-token rotation for long-lived owner sessions.
 
 ### Not Started Yet
 
