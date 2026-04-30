@@ -10,13 +10,14 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - SQLAlchemy async setup and Alembic migrations for `users`, `audit_log`, and `app_settings`.
 - Argon2 password hashing and TOTP verification helpers.
 - Next.js app shell with all nine blueprint application routes.
+- Frontend owner register/login flow wired to backend auth endpoints, including TOTP enrollment output.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
 
 ## Partially Implemented
 
-- Authentication: backend endpoints exist, but frontend login/register/2FA flow is not wired end-to-end.
+- Authentication: register/login/TOTP enrollment is wired; refresh tokens, Redis-backed sessions, route guards, and rate limiting are pending.
 - Database schema: foundation tables exist; full trading schema from Section 12 is pending.
 - Settings Vault: encrypted persistence and masked reads exist; frontend preload/edit state still needs refinement.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.
@@ -38,4 +39,4 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Next Blueprint Gate
 
-Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Before Phase 1, finish auth UI wiring and expand the foundation schema enough to support market-data ingestion.
+Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Before Phase 1, add session/rate-limit hardening and expand the foundation schema enough to support market-data ingestion.

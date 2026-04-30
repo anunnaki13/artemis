@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-05-01
+
+### Completed
+
+- Wired frontend owner authentication to backend endpoints:
+  - owner registration posts to `/api/auth/register`
+  - login posts to `/api/auth/login`
+  - registration displays TOTP secret and provisioning URI for authenticator enrollment
+  - successful login stores the short-lived access token in browser session storage
+
+### Validation
+
+- `make test` passed.
+- `npm run lint` passed.
+- `npm run typecheck` passed.
+
 ## 2026-04-30
 
 ### Completed
@@ -66,11 +82,9 @@ Phase 0 is partially complete and operational as a development foundation.
 
 Remaining before Phase 1:
 
-- Wire frontend login/register/TOTP flow to backend endpoints.
 - Wire frontend Settings page to preload current masked values.
 - Expand database schema beyond `users` and `audit_log`.
 - Add session management and rate limiting.
-- Wire frontend login/register/TOTP flow to backend endpoints.
 
 ### Not Started Yet
 
