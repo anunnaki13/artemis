@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     capital_profiles_path: str = "./config/capital_profiles.yaml"
     growth_plan_path: str = "./config/growth_plan.yaml"
     prometheus_enabled: bool = True
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
 
 
 @lru_cache

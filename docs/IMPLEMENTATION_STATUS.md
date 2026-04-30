@@ -15,6 +15,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Frontend app route guard validates the HttpOnly cookie session through `/auth/me`.
 - Binance public REST market-data ingestion for Spot symbols and candles.
 - Capital Profile Manager with v2.1 MICRO/SMALL/STANDARD/SCALED rules and growth-plan config.
+- Telegram notification skeleton with protected test endpoint and encrypted settings lookup.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
@@ -28,6 +29,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.
 - Capital profiles: read/evaluate path exists; automatic hourly equity refresh, audit logging, and Telegram profile-change notifications are pending.
 - Observability: Prometheus endpoint and service exist, but domain metrics and Grafana dashboards are pending.
+- Notifications: Telegram test path exists; recurring heartbeat, severity routing, repeated critical alerts, and email fallback are pending.
 - Frontend: route shell exists; production terminal UI is being improved before live data integration.
 
 ## Not Implemented Yet
@@ -40,7 +42,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Paper trading simulator and live-vs-backtest divergence tracker.
 - Full execution quality and cost accounting pipeline.
 - AI Analyst OpenRouter integration and suggestion approval workflow.
-- Notification service, Telegram alerts, recovery service, and dead-man switch.
+- Recovery service and dead-man switch.
 - Full production deployment hardening, backups, Nginx TLS, and disaster recovery drills.
 
 ## Next Blueprint Gate

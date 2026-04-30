@@ -4,7 +4,7 @@ from prometheus_client import make_asgi_app
 
 from app.config import get_settings
 from app.core.logging import configure_logging
-from app.routers import auth, dashboard, health, market_data, risk
+from app.routers import auth, dashboard, health, market_data, notifications, risk
 from app.routers import settings as settings_router
 
 
@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api")
     app.include_router(dashboard.router, prefix="/api")
     app.include_router(market_data.router, prefix="/api")
+    app.include_router(notifications.router, prefix="/api")
     app.include_router(risk.router, prefix="/api")
     app.include_router(settings_router.router, prefix="/api")
     if settings.prometheus_enabled:

@@ -36,6 +36,10 @@
   - `config/growth_plan.yaml`
   - `CapitalProfileManager`
   - `/api/risk/capital-profile` returns `MICRO` for simulated `$100` equity
+- Added Telegram notification service skeleton:
+  - reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from encrypted Settings Vault or environment fallback
+  - protected `/api/notifications/telegram/test` endpoint sends a test message
+  - notifier unit test uses an HTTP mock transport
 
 ### Validation
 
