@@ -30,6 +30,15 @@ class BinanceMarketDataClient:
                 raise ValueError("unexpected klines payload")
             return payload
 
+    async def ticker_24h(self) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=15.0) as client:
+            response = await client.get("/api/v3/ticker/24hr")
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("unexpected ticker payload")
+            return [item for item in payload if isinstance(item, dict)]
+
 
 def decimal_or_none(value: str | None) -> Decimal | None:
     if value is None:

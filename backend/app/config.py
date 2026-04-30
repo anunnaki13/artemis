@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     risk_policy_path: str = "./config/risk_policy.yaml"
     capital_profiles_path: str = "./config/capital_profiles.yaml"
     growth_plan_path: str = "./config/growth_plan.yaml"
+    universe_config_path: str = "./config/edge/universe.yaml"
+    universe_blacklist_path: str = "./config/edge/blacklist.yaml"
     prometheus_enabled: bool = True
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None

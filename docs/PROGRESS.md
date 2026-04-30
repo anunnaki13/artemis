@@ -40,6 +40,11 @@
   - reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` from encrypted Settings Vault or environment fallback
   - protected `/api/notifications/telegram/test` endpoint sends a test message
   - notifier unit test uses an HTTP mock transport
+- Added v2.1 Symbol Universe Manager foundation:
+  - `config/edge/universe.yaml`
+  - `config/edge/blacklist.yaml`
+  - `/api/edge/universe/refresh` filters Binance 24h tickers into the mid-cap universe
+  - unit tests cover blacklist, volume filter, stablecoin base exclusion, and ranking
 
 ### Validation
 

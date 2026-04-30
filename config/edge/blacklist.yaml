@@ -1,0 +1,14 @@
+symbols:
+  - BUSDUSDT
+  - USDCUSDT
+  - TUSDUSDT
+  - FDUSDUSDT
+  - USD1USDT
+  - RLUSDUSDT
+reasons:
+  BUSDUSDT: stablecoin_pair
+  USDCUSDT: stablecoin_pair
+  TUSDUSDT: stablecoin_pair
+  FDUSDUSDT: stablecoin_pair
+  USD1USDT: stablecoin_pair
+  RLUSDUSDT: stablecoin_pair

@@ -1,0 +1,21 @@
+quote_assets:
+  - USDT
+min_quote_volume_usd: 20000000
+max_quote_volume_usd: 200000000
+max_symbols: 50
+prefer_symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - BNBUSDT
+exclude_stablecoin_bases:
+  - USDC
+  - FDUSD
+  - TUSD
+  - USDP
+  - USD1
+  - RLUSD
+  - DAI
+  - EUR
+  - TRY
+  - BRL
+  - UAH

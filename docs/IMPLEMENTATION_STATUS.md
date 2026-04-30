@@ -16,6 +16,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Binance public REST market-data ingestion for Spot symbols and candles.
 - Capital Profile Manager with v2.1 MICRO/SMALL/STANDARD/SCALED rules and growth-plan config.
 - Telegram notification skeleton with protected test endpoint and encrypted settings lookup.
+- Symbol Universe Manager foundation with Binance 24h ticker filtering and blacklist enforcement.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
@@ -30,6 +31,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Capital profiles: read/evaluate path exists; automatic hourly equity refresh, audit logging, and Telegram profile-change notifications are pending.
 - Observability: Prometheus endpoint and service exist, but domain metrics and Grafana dashboards are pending.
 - Notifications: Telegram test path exists; recurring heartbeat, severity routing, repeated critical alerts, and email fallback are pending.
+- Edge modules: Symbol Universe Manager exists as an on-demand endpoint; daily scheduler, persistence, UI, and regime state machine are pending.
 - Frontend: route shell exists; production terminal UI is being improved before live data integration.
 
 ## Not Implemented Yet
