@@ -9,12 +9,17 @@
   - login posts to `/api/auth/login`
   - registration displays TOTP secret and provisioning URI for authenticator enrollment
   - successful login stores the short-lived access token in browser session storage
+- Wired Settings page to preload backend configuration status:
+  - configured/empty status is shown per field
+  - non-secret values preload into inputs
+  - secret inputs stay blank and show masked backend values only as placeholders
 
 ### Validation
 
 - `make test` passed.
 - `npm run lint` passed.
 - `npm run typecheck` passed.
+- `npm run build` passed.
 
 ## 2026-04-30
 
@@ -82,7 +87,6 @@ Phase 0 is partially complete and operational as a development foundation.
 
 Remaining before Phase 1:
 
-- Wire frontend Settings page to preload current masked values.
 - Expand database schema beyond `users` and `audit_log`.
 - Add session management and rate limiting.
 

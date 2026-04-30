@@ -14,12 +14,13 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
+- Settings Vault UI preloads configured state, non-secret values, and masked placeholders for secrets.
 
 ## Partially Implemented
 
 - Authentication: register/login/TOTP enrollment is wired; refresh tokens, Redis-backed sessions, route guards, and rate limiting are pending.
 - Database schema: foundation tables exist; full trading schema from Section 12 is pending.
-- Settings Vault: encrypted persistence and masked reads exist; frontend preload/edit state still needs refinement.
+- Settings Vault: encrypted persistence, masked reads, and frontend preload exist; connection testing is pending.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.
 - Observability: Prometheus endpoint and service exist, but domain metrics and Grafana dashboards are pending.
 - Frontend: route shell exists; production terminal UI is being improved before live data integration.
