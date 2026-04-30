@@ -1,0 +1,28 @@
+risk_per_trade: 0.005
+max_daily_loss: 0.02
+max_weekly_drawdown: 0.05
+max_concurrent_positions: 3
+max_correlation_sum: 2.5
+loss_streak_pause:
+  count: 3
+  duration_minutes: 60
+position_sizing:
+  method: atr_volatility
+  atr_period: 14
+  atr_multiplier: 1.5
+  kelly_fraction: 0.25
+regime_multipliers:
+  trending: 1.0
+  ranging: 0.7
+  choppy: 0.5
+  extreme: 0.3
+drawdown_ladder:
+  - { threshold: -0.03, size_multiplier: 0.7 }
+  - { threshold: -0.05, size_multiplier: 0.5 }
+  - { threshold: -0.08, size_multiplier: 0.0 }
+  - { threshold: -0.10, action: flatten_lock }
+hard_limits:
+  max_position_pct: 0.10
+  max_total_exposure_pct: 1.00
+  max_leverage: 3.0
+  absolute_max_daily_loss: 0.05
