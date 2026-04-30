@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     auth_cookie_name: str = "aiq_access_token"
     refresh_expire_days: int = 7
     risk_policy_path: str = "./config/risk_policy.yaml"
+    capital_profiles_path: str = "./config/capital_profiles.yaml"
+    growth_plan_path: str = "./config/growth_plan.yaml"
     prometheus_enabled: bool = True
 
 

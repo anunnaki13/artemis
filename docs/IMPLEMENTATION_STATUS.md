@@ -1,6 +1,6 @@
 # Implementation Status
 
-This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
+This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 
 ## Implemented
 
@@ -14,6 +14,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Redis-backed auth rate limits, JWT session registry, `/auth/me`, and `/auth/logout` foundation.
 - Frontend app route guard validates the HttpOnly cookie session through `/auth/me`.
 - Binance public REST market-data ingestion for Spot symbols and candles.
+- Capital Profile Manager with v2.1 MICRO/SMALL/STANDARD/SCALED rules and growth-plan config.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
@@ -25,6 +26,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Database schema: auth, settings, audit, and market-data foundation tables exist; full trading/execution schema from Section 12 is pending.
 - Settings Vault: encrypted persistence, masked reads, and frontend preload exist; connection testing is pending.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.
+- Capital profiles: read/evaluate path exists; automatic hourly equity refresh, audit logging, and Telegram profile-change notifications are pending.
 - Observability: Prometheus endpoint and service exist, but domain metrics and Grafana dashboards are pending.
 - Frontend: route shell exists; production terminal UI is being improved before live data integration.
 

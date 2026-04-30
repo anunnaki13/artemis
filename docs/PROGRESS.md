@@ -31,6 +31,11 @@
   - `/api/market-data/symbols` reads persisted symbols
   - `/api/market-data/candles/ingest` ingests Binance kline/candlestick batches
   - `/api/market-data/candles` reads persisted candles
+- Incorporated blueprint v2.1 small-capital requirements:
+  - `config/capital_profiles.yaml`
+  - `config/growth_plan.yaml`
+  - `CapitalProfileManager`
+  - `/api/risk/capital-profile` returns `MICRO` for simulated `$100` equity
 
 ### Validation
 

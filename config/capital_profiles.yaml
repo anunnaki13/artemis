@@ -1,0 +1,65 @@
+profiles:
+  micro:
+    equity_min: 50
+    equity_max: 500
+    min_notional_buffer: 1.5
+    max_concurrent_positions: 1
+    risk_per_trade_pct: 2.0
+    min_trade_target_r: 2.5
+    preferred_fee_tier: maker_only
+    stablecoin_only_in_idle: true
+    avoid_pairs_below_volume: 50000000
+    use_futures: false
+    forbidden_strategies:
+      - grid_trading
+      - high_frequency_scalping
+      - dca_more_than_3_levels
+      - sub_1h_average_hold_time
+
+  small:
+    equity_min: 500
+    equity_max: 5000
+    min_notional_buffer: 1.2
+    max_concurrent_positions: 2
+    risk_per_trade_pct: 1.5
+    min_trade_target_r: 2.0
+    preferred_fee_tier: maker_preferred
+    stablecoin_only_in_idle: true
+    avoid_pairs_below_volume: 30000000
+    use_futures: optional
+    forbidden_strategies:
+      - high_frequency_scalping
+
+  standard:
+    equity_min: 5000
+    equity_max: 50000
+    min_notional_buffer: 1.0
+    max_concurrent_positions: 3
+    risk_per_trade_pct: 1.0
+    min_trade_target_r: 1.5
+    preferred_fee_tier: any
+    stablecoin_only_in_idle: false
+    avoid_pairs_below_volume: 10000000
+    use_futures: true
+    forbidden_strategies: []
+
+  scaled:
+    equity_min: 50000
+    equity_max: null
+    min_notional_buffer: 1.0
+    max_concurrent_positions: 5
+    risk_per_trade_pct: 0.5
+    min_trade_target_r: 1.5
+    preferred_fee_tier: any
+    stablecoin_only_in_idle: false
+    avoid_pairs_below_volume: 5000000
+    use_futures: true
+    forbidden_strategies: []
+
+fee_strategy:
+  default_order_type: limit
+  taker_fallback_after_seconds: 60
+  taker_fallback_only_if: signal_still_valid_and_price_within_0_1pct
+  use_bnb_for_fees: true
+  maintain_bnb_balance_usd: 5
+  vip_tier_target: VIP1

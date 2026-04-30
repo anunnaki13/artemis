@@ -1,0 +1,51 @@
+tiers:
+  - equity_min: 50
+    equity_max: 200
+    name: seed
+    strategy_mix:
+      funding_arb: 70
+      cash: 30
+    monthly_target_pct: 3
+
+  - equity_min: 200
+    equity_max: 500
+    name: germination
+    strategy_mix:
+      funding_arb: 50
+      mid_cap_swing: 30
+      cash: 20
+    monthly_target_pct: 4
+
+  - equity_min: 500
+    equity_max: 2000
+    name: growth
+    strategy_mix:
+      funding_arb: 30
+      mid_cap_swing: 30
+      regime_trend: 25
+      cash: 15
+    monthly_target_pct: 5
+
+  - equity_min: 2000
+    equity_max: 10000
+    name: diversification
+    strategy_mix:
+      funding_arb: 25
+      mid_cap_swing: 25
+      regime_trend: 20
+      microstructure: 15
+      cash: 15
+    monthly_target_pct: 6
+
+  - equity_min: 10000
+    equity_max: null
+    name: scaled
+    strategy_mix:
+      dynamic_allocation: 100
+    monthly_target_pct: 5
+
+withdrawal_policy:
+  enabled: true
+  trigger: equity_doubles_from_starting
+  withdraw_pct_of_profit: 30
+  cooldown_days: 30
