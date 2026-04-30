@@ -7,7 +7,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 - Repository scaffold matching the v2 architecture.
 - Docker Compose development stack: frontend, backend, PostgreSQL/TimescaleDB, Redis, Prometheus.
 - FastAPI backend with health, auth registration/login foundation, dashboard summary, risk policy, and encrypted settings endpoints.
-- SQLAlchemy async setup and Alembic migrations for `users`, `audit_log`, and `app_settings`.
+- SQLAlchemy async setup and Alembic migrations for `users`, `audit_log`, `app_settings`, `symbols`, `candles`, and `market_snapshots`.
 - Argon2 password hashing and TOTP verification helpers.
 - Next.js app shell with all nine blueprint application routes.
 - Frontend owner register/login flow wired to backend auth endpoints, including TOTP enrollment output.
@@ -19,7 +19,7 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 ## Partially Implemented
 
 - Authentication: register/login/TOTP enrollment is wired; refresh tokens, Redis-backed sessions, route guards, and rate limiting are pending.
-- Database schema: foundation tables exist; full trading schema from Section 12 is pending.
+- Database schema: auth, settings, audit, and market-data foundation tables exist; full trading/execution schema from Section 12 is pending.
 - Settings Vault: encrypted persistence, masked reads, and frontend preload exist; connection testing is pending.
 - Risk policy: config file and read endpoint exist, but the five-layer risk engine is pending.
 - Observability: Prometheus endpoint and service exist, but domain metrics and Grafana dashboards are pending.
@@ -40,4 +40,4 @@ This tracks AIQ-BOT v2 blueprint coverage as of Phase 0 foundation.
 
 ## Next Blueprint Gate
 
-Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Before Phase 1, add session/rate-limit hardening and expand the foundation schema enough to support market-data ingestion.
+Phase 0 gate is close: `make test`, `make lint`, `make typecheck`, Docker Compose, and migrations are working locally. Before Phase 1, add session/rate-limit hardening, then implement Binance public market-data ingestion.

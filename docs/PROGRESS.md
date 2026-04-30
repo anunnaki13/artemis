@@ -13,6 +13,10 @@
   - configured/empty status is shown per field
   - non-secret values preload into inputs
   - secret inputs stay blank and show masked backend values only as placeholders
+- Added Phase 1 market-data persistence foundation:
+  - `symbols` table for Binance symbol filters and status
+  - `candles` table for OHLCV ingestion
+  - `market_snapshots` table for ticker/orderbook/funding/open-interest snapshots
 
 ### Validation
 
@@ -87,7 +91,6 @@ Phase 0 is partially complete and operational as a development foundation.
 
 Remaining before Phase 1:
 
-- Expand database schema beyond `users` and `audit_log`.
 - Add session management and rate limiting.
 
 ### Not Started Yet
