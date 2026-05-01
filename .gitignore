@@ -16,3 +16,4 @@ dist/
 coverage/
 *.log
 ops/certs/
+backend/var/

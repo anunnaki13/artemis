@@ -115,6 +115,65 @@
   - added `/api/execution/venues/events/ingest` for owner-controlled venue event ingestion
   - async venue statuses now map into lifecycle transitions for `FILLED`, `CANCELED`, `REJECTED`, and related terminal states
   - non-terminal updates such as `PARTIALLY_FILLED` persist on the intent as live execution progress without prematurely closing the lifecycle
+- Added Binance venue-native async execution consumer:
+  - new Binance user-stream service subscribes to authenticated spot `executionReport` events over WebSocket API
+  - added `/api/execution/venues/binance/user-stream/start`, `/stop`, and `/status`
+  - listener now persists raw venue events and updates matching intents directly without manual reconciliation calls
+  - app shutdown now stops both market-data and execution venue streams cleanly
+- Added spot account-state reconciliation from venue events:
+  - new `spot_account_balances` table stores current free, locked, total, and estimated USD value per asset
+  - Binance user stream now consumes `outboundAccountPosition` and `balanceUpdate`
+  - added `/api/execution/account/balances`
+  - dashboard summary now includes top synchronized balances for operator visibility
+- Added spot symbol-exposure reconciliation from trade fills:
+  - new `spot_symbol_positions` table stores net quantity, average entry price, quote exposure, and realized notional per symbol
+  - Binance user stream now consumes `executionReport` trade deltas into a symbol-level exposure read model
+  - added `/api/execution/account/positions`
+  - dashboard summary now includes top synchronized symbol exposures alongside balances
+- Wired risk evaluation to persisted venue exposure state:
+  - `/api/risk/evaluate-signal` now derives open-position count and total exposure from `spot_symbol_positions` when manual inputs are omitted
+  - execution intent submission reuses the same derived exposure path
+  - hard total exposure cap is now enforced in the risk gate in addition to per-trade position sizing
+- Hardened spot position reconciliation for repeated partial fills:
+  - new `spot_order_fill_states` table stores cumulative per-order fill progress keyed by client/venue order identifiers
+  - Binance user stream now applies symbol exposure updates from cumulative `executionReport` quantities (`z`/`Z`) instead of trusting each event as a fresh fill delta
+  - duplicate or replayed partial-fill events no longer double-count net quantity or quote exposure
+- Added persisted mark-to-market PnL state for spot positions:
+  - `spot_symbol_positions` now stores `last_mark_price`, `market_value_usd`, `realized_pnl_usd`, and `unrealized_pnl_usd`
+  - position marks refresh from the latest `market_snapshots` price on fill updates and account-position reads
+  - dashboard summary now exposes realized and unrealized position PnL from synced backend state
+- Added execution-intent cancel/replace lineage for non-dispatched orders:
+  - `execution_intents` now tracks `cancelled_at`, `parent_intent_id`, and `replaced_by_intent_id`
+  - added `POST /api/execution/intents/{intent_id}/replace` for `queued` and `approved` intents
+  - replacement flow cancels the original intent, re-runs risk evaluation for the replacement request, and links both intents for auditability
+- Added venue-aware cancel flow for dispatched intents:
+  - lifecycle now includes `cancel_requested` before terminal cancel resolution
+  - added `POST /api/execution/intents/{intent_id}/cancel`
+  - paper and Binance adapter paths now support explicit cancel requests, with venue response persisted into intent execution payload
+- Added execution fill ledger for journal-grade close accounting:
+  - new `spot_execution_fills` table stores each fill delta with quantity, quote quantity, price, realized pnl, and post-fill position state
+  - account-state reconciliation now persists fill rows alongside aggregate position updates
+  - added `GET /api/execution/account/fills`
+- Added execution-quality and journal summary reads on top of the fill ledger:
+  - new `GET /api/execution/account/fills/summary`
+  - backend now computes fill win-rate, gross realized pnl, gross notional, and recent order-chain summaries grouped by order identifiers
+- Added intent and strategy attribution to the fill ledger:
+  - `spot_execution_fills` now stores `execution_intent_id` and `source_strategy`
+  - Binance user-stream reconciliation passes matched intent attribution into persisted fill rows
+  - execution summary reads can now be segmented by strategy lineage instead of raw order ids only
+- Added frontend operator surfaces for journal and execution-quality:
+  - Journal now reads live fill ledger rows and summary chains
+  - Execution Quality now reads live fill and lineage summaries
+  - strategy-level breakdown and lineage outcome views are visible in UI
+- Added dashboard operator/export surfaces:
+  - dashboard now shows strategy cohorts, lineage alerts, and execution/operator panels from backend state
+  - CSV exports are available for strategy breakdown, lineage alerts, fills, chains, and lineage outcomes
+- Added scheduled digest reporting and operator analytics:
+  - new `/api/reports/daily-digest/run`, `/artifacts`, `/runs`, `/series`, and digest artifact download/export paths
+  - daily digest generates JSON plus CSV artifacts, performs retention cleanup, and can notify Telegram
+  - digest metadata now persists in `daily_digest_runs`
+  - digest anomaly scoring tracks zero-fill days, negative top-strategy pnl, and high lineage-alert pressure
+  - dashboard now shows digest anomaly banner, digest run log, trend sparklines, range presets, series CSV export, and comparison overlays
 
 ### Validation
 
@@ -124,6 +183,27 @@
 - `npm run lint` passed.
 - `npm run typecheck` passed.
 - `npm run build` passed.
+
+### Current Delivered Sequence
+
+1. foundation, auth, settings vault
+2. market-data REST + websocket ingestion
+3. orderbook reconstruction + liquidity metrics
+4. strategy evaluation + risk gate
+5. execution queue + worker lifecycle + reconciliation
+6. venue user-stream sync for balances, positions, and fills
+7. journal/execution-quality read models and frontend pages
+8. digest reporting, anomaly scoring, run-log persistence, and dashboard analytics
+
+### Next Development Sequence
+
+1. digest comparison statistics and richer operator filtering
+2. production-grade venue execution hardening
+3. stronger lot-level pnl accounting and execution cost audit
+4. multi-strategy registry expansion
+5. backtest, walk-forward, Monte Carlo, and sensitivity research layers
+6. recovery, dead-man switch, and alerting hardening
+7. AI Analyst backend integration and approval workflow
 
 ## 2026-04-30
 

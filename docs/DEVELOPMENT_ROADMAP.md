@@ -1,0 +1,258 @@
+# Development Roadmap
+
+This document separates three views of the system:
+
+1. what has already been delivered
+2. what is currently operational
+3. what should be developed next, in order
+
+Date baseline: `2026-05-01`
+
+## 1. Delivered So Far
+
+### Foundation and platform
+
+- FastAPI backend, Next.js frontend, PostgreSQL/Timescale, Redis, Prometheus, Docker Compose.
+- Owner authentication with TOTP, Redis-backed session validation, login/register rate limits, logout, and HttpOnly cookie flow.
+- Encrypted Settings Vault with masked reads and protected writes.
+- Dense operator UI shell for:
+  - Dashboard
+  - Terminal
+  - Strategies
+  - Backtest
+  - Risk
+  - AI Analyst
+  - Journal
+  - Execution Quality
+  - Logs
+  - Settings
+
+### Market data and microstructure
+
+- Binance Spot symbol sync and candle ingestion.
+- Binance combined WebSocket streaming for:
+  - kline
+  - mini-ticker
+  - book-ticker
+  - depth deltas
+- Binance Futures polling for:
+  - funding rate
+  - open interest
+- In-memory orderbook reconstruction with gap recovery and REST rebootstrap.
+- Derived liquidity metrics:
+  - spread
+  - spread bps
+  - best bid / ask
+  - 0.5% bid depth notional
+  - 0.5% ask depth notional
+  - imbalance ratio
+- Persistence for:
+  - candles
+  - market snapshots
+  - historical orderbook snapshots
+
+### Strategy and risk foundation
+
+- Capital profile and growth-plan configs.
+- Symbol universe filtering and blacklist support.
+- Initial `orderbook_imbalance` strategy evaluation.
+- Risk gate for signals with checks on:
+  - position sizing
+  - leverage
+  - daily loss
+  - forbidden strategy list
+  - liquidity floor
+  - target R
+  - total exposure
+- Risk now derives open positions and exposure from synced venue state instead of only manual inputs.
+
+### Execution core
+
+- Execution intent queue with status transitions and audit persistence.
+- Worker lifecycle with:
+  - queue
+  - approve
+  - dispatch
+  - execute
+  - fail stale
+  - reconcile
+- Stable execution adapter contract.
+- Paper adapter and Binance adapter scaffolding.
+- Runtime-gated authenticated Binance execution transport.
+- Cancel flow for `dispatching` intents.
+- Replace flow for `queued` / `approved` intents.
+- Order-id-based reconciliation.
+- Raw venue event persistence.
+
+### Venue account state
+
+- Binance user-stream consumer for authenticated execution/account events.
+- Synced spot balances.
+- Synced spot symbol positions.
+- Partial-fill dedupe using cumulative order-fill state.
+- Mark-to-market state with:
+  - realized pnl
+  - unrealized pnl
+  - last mark price
+  - market value
+
+### Journal and execution quality
+
+- Fill ledger with intent attribution and strategy attribution.
+- Fill summary and chain summary reads.
+- Lineage outcome reads for replacement chains.
+- Per-strategy outcome summaries.
+- Frontend Journal and Execution Quality pages now consume live backend data instead of placeholders.
+
+### Reporting and operator tooling
+
+- CSV exports for:
+  - fills
+  - fill chains
+  - lineage outcomes
+  - dashboard strategy breakdown
+  - dashboard lineage alerts
+- Daily digest generation:
+  - `summary.json`
+  - `strategy_breakdown.csv`
+  - `lineage_alerts.csv`
+- Scheduled daily digest runner.
+- Artifact retention cleanup.
+- Telegram completion notification for digest generation.
+- Digest anomaly scoring.
+- Persisted `daily_digest_runs` table.
+- Digest trend series API and dashboard visualization.
+- Range presets and CSV export for digest series.
+- Comparison mode in dashboard trend panel:
+  - anomaly vs fills
+  - anomaly vs lineage alerts
+  - anomaly vs top-strategy pnl
+
+## 2. Current Operational Surface
+
+The system is not just scaffolded anymore. It currently behaves like an early operator-grade trading platform foundation.
+
+### Backend currently operational
+
+- live market-data streaming and persistence
+- orderbook reconstruction and liquidity metrics
+- basic strategy evaluation
+- risk-gated execution intent submission
+- queue / dispatch / reconcile execution lifecycle
+- venue account sync for balances and spot positions
+- journal-grade fill recording
+- digest generation, digest history, anomaly tracking
+
+### Frontend currently operational
+
+- Dashboard is live and backend-driven
+- Journal is backend-driven
+- Execution Quality is backend-driven
+- Digest trend and digest anomaly panels are live
+- Settings/Auth flows are wired end to end
+
+### VPS/runtime
+
+- public frontend: `http://103.150.197.225:3066`
+- backend health: `http://127.0.0.1:8000/health`
+- latest runtime state has been repeatedly validated during implementation
+
+## 3. Development Steps Completed
+
+This is the implementation sequence that has already been delivered.
+
+1. Phase 0 repo/platform foundation
+2. auth hardening and settings vault
+3. market-data REST ingestion
+4. market-data WebSocket ingestion
+5. orderbook reconstruction and liquidity metrics
+6. historical orderbook persistence
+7. first strategy evaluation path
+8. risk gate
+9. execution intent queue
+10. worker lifecycle and reconciliation
+11. adapter contract and order identifiers
+12. runtime Binance transport gating
+13. venue user-stream consumer
+14. synced balances and positions
+15. partial-fill dedupe and mark-to-market pnl
+16. cancel/replace lineage
+17. fill ledger and chain summaries
+18. strategy attribution in journal/execution quality
+19. dashboard/operator exports
+20. daily digest generation and retention
+21. digest anomaly scoring
+22. persisted digest run logs
+23. digest trend series and comparison mode
+
+## 4. Next Development Queue
+
+The next steps below are ordered by leverage, not by novelty.
+
+### Near-term priority
+
+1. Digest comparison statistics
+   - average anomaly score in selected range
+   - average fills per digest
+   - flagged-days count
+   - worst top-strategy pnl
+
+2. Digest trend filters beyond presets
+   - custom date range
+   - anomaly-only filter
+   - positive/negative pnl filter
+
+3. Run-log export expansion
+   - include anomaly flags as separate columns
+   - include digest artifact availability status
+
+### Execution and trading-core hardening
+
+4. Real venue execution completion
+   - production-grade Binance order transport
+   - richer venue error mapping
+   - partial fill and cancel reconciliation depth
+
+5. Position and pnl accounting hardening
+   - close-lot accounting
+   - multi-order close attribution
+   - stronger realized pnl audit trail
+
+6. Strategy registry expansion
+   - multiple baseline strategies
+   - parameterized strategy config registry
+   - strategy enable/disable controls
+
+### Research and validation
+
+7. Backtest engine implementation
+8. walk-forward and Monte Carlo validation
+9. sensitivity analysis and Deflated Sharpe
+10. live-vs-research divergence reporting
+
+### Ops and resilience
+
+11. dead-man switch
+12. heartbeat and repeated critical alerts
+13. recovery workflows and replay tooling
+14. backup and restore verification
+
+### Product and AI layer
+
+15. AI Analyst backend integration
+16. approval workflow for AI suggestions
+17. operator review surfaces for AI-generated recommendations
+
+## 5. Recommended Build Order From Here
+
+If development continues without changing direction, the most efficient sequence is:
+
+1. finish digest/operator analytics
+2. complete execution hardening
+3. deepen accounting and pnl correctness
+4. expand strategy set
+5. build research pipeline
+6. add resilience/recovery
+7. integrate AI Analyst
+
+That keeps the platform usable while reducing the highest-risk gaps first.

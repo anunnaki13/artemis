@@ -44,7 +44,8 @@ class SignalRiskEvaluateRequest(BaseModel):
     current_equity: Decimal
     entry_price: Decimal
     proposed_notional: Decimal
-    current_open_positions: int = 0
+    current_open_positions: int | None = None
+    current_total_exposure_notional: Decimal | None = None
     daily_pnl_pct: Decimal = Decimal("0")
     leverage: Decimal = Decimal("1")
     quote_volume_usd: Decimal | None = None
@@ -58,3 +59,5 @@ class SignalRiskEvaluateResponse(BaseModel):
     recommended_max_notional: Decimal
     recommended_risk_amount: Decimal
     computed_r_multiple: Decimal | None
+    evaluated_open_positions: int = 0
+    evaluated_total_exposure_notional: Decimal = Decimal("0")

@@ -12,6 +12,7 @@ class SignalRiskInput:
     entry_price: Decimal
     proposed_notional: Decimal
     current_open_positions: int
+    current_total_exposure_notional: Decimal
     daily_pnl_pct: Decimal
     leverage: Decimal
     quote_volume_usd: Decimal | None
@@ -26,6 +27,8 @@ class SignalRiskDecision:
     recommended_risk_amount: Decimal
     computed_r_multiple: Decimal | None
     profile_name: str
+    evaluated_open_positions: int
+    evaluated_total_exposure_notional: Decimal
 
 
 class SignalRiskGate:
@@ -39,12 +42,16 @@ class SignalRiskGate:
 
         recommended_max_notional = payload.current_equity * Decimal("0.10")
         recommended_risk_amount = payload.current_equity * (profile.risk_per_trade_pct / Decimal("100"))
+        max_total_exposure = payload.current_equity
 
         if payload.current_open_positions >= profile.max_concurrent_positions:
             reasons.append("max concurrent positions reached for active capital profile")
 
         if payload.proposed_notional > recommended_max_notional:
             reasons.append("proposed notional exceeds hard max position size")
+
+        if payload.current_total_exposure_notional + payload.proposed_notional > max_total_exposure:
+            reasons.append("proposed trade exceeds hard max total exposure")
 
         if payload.leverage > Decimal("3"):
             reasons.append("proposed leverage exceeds hard max leverage")
@@ -77,6 +84,8 @@ class SignalRiskGate:
             recommended_risk_amount=recommended_risk_amount,
             computed_r_multiple=r_multiple,
             profile_name=profile.name,
+            evaluated_open_positions=payload.current_open_positions,
+            evaluated_total_exposure_notional=payload.current_total_exposure_notional,
         )
 
     def _compute_r_multiple(self, signal: Signal, entry_price: Decimal) -> Decimal | None:

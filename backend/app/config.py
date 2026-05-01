@@ -17,13 +17,16 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     binance_api_base_url: str = "https://api.binance.com"
     binance_ws_base_url: str = "wss://stream.binance.com:9443"
+    binance_ws_api_base_url: str = "wss://ws-api.binance.com:443/ws-api/v3"
     binance_futures_api_base_url: str = "https://fapi.binance.com"
     binance_spot_testnet_api_base_url: str = "https://testnet.binance.vision"
+    binance_ws_api_testnet_base_url: str = "wss://ws-api.testnet.binance.vision/ws-api/v3"
     market_data_poll_interval_seconds: int = 30
     orderbook_persist_interval_seconds: int = 5
     orderbook_snapshot_depth_levels: int = 20
     execution_dispatch_timeout_seconds: int = 30
     execution_live_transport_enabled: bool = False
+    execution_user_stream_recv_window: int = 5000
     cors_origins: str = "http://localhost:3066,http://127.0.0.1:3066,http://103.150.197.225:3066"
     jwt_secret: SecretStr = Field(default=SecretStr("dev-only-change-me"))
     jwt_expire_minutes: int = 15
@@ -35,6 +38,11 @@ class Settings(BaseSettings):
     growth_plan_path: str = "./config/growth_plan.yaml"
     universe_config_path: str = "./config/edge/universe.yaml"
     universe_blacklist_path: str = "./config/edge/blacklist.yaml"
+    reports_output_dir: str = "./var/reports"
+    reports_daily_digest_enabled: bool = True
+    reports_daily_digest_hour_utc: int = 0
+    reports_daily_digest_retention_days: int = 30
+    reports_daily_digest_telegram_enabled: bool = True
     prometheus_enabled: bool = True
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None

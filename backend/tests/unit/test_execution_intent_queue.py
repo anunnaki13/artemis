@@ -92,6 +92,8 @@ def test_execution_intent_queue_validates_transitions() -> None:
 
     assert service.validate_status_transition("queued", "approved") is True
     assert service.validate_status_transition("approved", "dispatching") is True
+    assert service.validate_status_transition("dispatching", "cancel_requested") is True
+    assert service.validate_status_transition("cancel_requested", "cancelled") is True
     assert service.validate_status_transition("dispatching", "executed") is True
     assert service.validate_status_transition("queued", "executed") is False
     assert service.validate_status_transition("executed", "cancelled") is False
@@ -162,3 +164,76 @@ async def test_execution_intent_queue_records_venue_event() -> None:
     assert event.reconcile_state == "applied"
     assert event.reconciled_at is not None
     assert service.to_venue_event_read(event).venue_status == "PARTIALLY_FILLED"
+
+
+async def test_execution_intent_queue_marks_cancelled_timestamp() -> None:
+    service = ExecutionIntentQueueService()
+    user = User(
+        id=uuid4(),
+        email="owner@example.com",
+        password_hash="hash",
+        totp_secret=None,
+        role="owner",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    intent = service.build_intent(
+        user=user,
+        risk_request=build_signal_risk_request(),
+        risk_response=build_signal_risk_response(),
+        notes="queue this",
+    )
+    intent.id = 99
+    intent.created_at = datetime.now(tz=timezone.utc)
+    intent.updated_at = datetime.now(tz=timezone.utc)
+
+    updated = await service.update_status(
+        FakeScalarSession(intent),  # type: ignore[arg-type]
+        intent=intent,
+        status="cancelled",
+        notes="operator cancelled",
+    )
+
+    assert updated.status == "cancelled"
+    assert updated.cancelled_at is not None
+
+
+async def test_execution_intent_queue_links_replacement_intent() -> None:
+    service = ExecutionIntentQueueService()
+    user = User(
+        id=uuid4(),
+        email="owner@example.com",
+        password_hash="hash",
+        totp_secret=None,
+        role="owner",
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    original = service.build_intent(
+        user=user,
+        risk_request=build_signal_risk_request(),
+        risk_response=build_signal_risk_response(),
+        notes="original",
+    )
+    original.id = 10
+    original.created_at = datetime.now(tz=timezone.utc)
+    original.updated_at = datetime.now(tz=timezone.utc)
+    replacement = service.build_intent(
+        user=user,
+        risk_request=build_signal_risk_request(),
+        risk_response=build_signal_risk_response(),
+        notes="replacement",
+    )
+    replacement.id = 11
+    replacement.parent_intent_id = 10
+    replacement.created_at = datetime.now(tz=timezone.utc)
+    replacement.updated_at = datetime.now(tz=timezone.utc)
+
+    linked = await service.link_replacement(
+        FakeScalarSession(original),  # type: ignore[arg-type]
+        intent=original,
+        replacement_intent=replacement,
+    )
+
+    read_model = service.to_read(linked)
+    assert linked.replaced_by_intent_id == 11
+    assert read_model.replaced_by_intent_id == 11
+    assert replacement.parent_intent_id == 10

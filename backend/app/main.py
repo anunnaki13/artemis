@@ -4,7 +4,7 @@ from prometheus_client import make_asgi_app
 
 from app.config import get_settings
 from app.core.logging import configure_logging
-from app.routers import auth, dashboard, edge, execution, health, market_data, notifications, risk, strategies
+from app.routers import auth, dashboard, edge, execution, health, market_data, notifications, reports, risk, strategies
 from app.routers import settings as settings_router
 
 
@@ -26,15 +26,22 @@ def create_app() -> FastAPI:
     app.include_router(execution.router, prefix="/api")
     app.include_router(market_data.router, prefix="/api")
     app.include_router(notifications.router, prefix="/api")
+    app.include_router(reports.router, prefix="/api")
     app.include_router(risk.router, prefix="/api")
     app.include_router(settings_router.router, prefix="/api")
     app.include_router(strategies.router, prefix="/api")
     if settings.prometheus_enabled:
         app.mount("/metrics", make_asgi_app())
 
+    @app.on_event("startup")
+    async def startup_background_services() -> None:
+        await reports.digest_service.start()
+
     @app.on_event("shutdown")
     async def shutdown_market_stream() -> None:
         await market_data.stream_service.stop()
+        await execution.user_stream_service.stop()
+        await reports.digest_service.stop()
 
     return app
 

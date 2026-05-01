@@ -221,3 +221,29 @@ async def test_execution_worker_maps_filled_venue_event_to_executed() -> None:
     assert updated.status == "executed"
     assert updated.execution_payload is not None
     assert updated.execution_payload["source"] == "reconciliation"
+
+
+async def test_execution_worker_cancels_dispatching_intent() -> None:
+    intent = build_approved_intent()
+    intent.id = 6
+    intent.status = "dispatching"
+    intent.created_at = datetime.now(tz=timezone.utc)
+    intent.updated_at = datetime.now(tz=timezone.utc)
+    intent.dispatched_at = datetime.now(tz=timezone.utc)
+    intent.client_order_id = "paper-client-6"
+    intent.venue_order_id = "paper-order-6"
+    intent.execution_venue = "paper"
+    session = FakeSession(intent)
+
+    worker = ExecutionWorkerService(ExecutionIntentQueueService())
+    cancelled = await worker.request_cancel(
+        session,  # type: ignore[arg-type]
+        intent=intent,
+        reason="operator abort",
+    )
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.cancelled_at is not None
+    assert cancelled.execution_payload is not None
+    assert cancelled.execution_payload["source"] == "venue_cancel"
+    assert cancelled.execution_payload["venue_status"] == "CANCELED"

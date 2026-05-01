@@ -53,8 +53,8 @@ def build_orderbook_snapshot_response(snapshot: OrderBookSnapshot) -> OrderBookS
     return OrderBookSnapshotPointResponse(
         symbol=snapshot.symbol,
         timestamp=snapshot.timestamp,
-        bids=levels_from_payload(snapshot.bids),
-        asks=levels_from_payload(snapshot.asks),
+        bids=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in levels_from_payload(snapshot.bids)],
+        asks=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in levels_from_payload(snapshot.asks)],
         metrics=build_orderbook_metrics_response(parsed_metrics),
     )
 
@@ -204,20 +204,45 @@ async def stop_market_stream(_: User = Depends(get_current_user)) -> MarketStrea
 async def get_orderbook(
     symbol: str,
     limit: int = Query(default=10, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
     _: User = Depends(get_current_user),
 ) -> OrderBookStateResponse:
     orderbook = stream_service.orderbook(symbol)
-    if orderbook is None:
+    if orderbook is not None:
+        metrics = orderbook.metrics()
+        return OrderBookStateResponse(
+            symbol=symbol.upper(),
+            bids=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in orderbook.top_bids(limit)],
+            asks=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in orderbook.top_asks(limit)],
+            metrics=build_orderbook_metrics_response(metrics),
+        )
+
+    snapshot = (
+        await session.scalar(
+            select(OrderBookSnapshot)
+            .where(OrderBookSnapshot.symbol == symbol.upper())
+            .order_by(OrderBookSnapshot.timestamp.desc())
+            .limit(1)
+        )
+    )
+    if snapshot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"orderbook for {symbol.upper()} is not available",
         )
-    metrics = orderbook.metrics()
+    parsed_metrics = metrics_from_payload({"metrics": snapshot.metrics}, snapshot.timestamp)
+    if parsed_metrics is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"persisted orderbook metrics for {symbol.upper()} are not available",
+        )
+    bids = [OrderBookLevel(price=level.price, quantity=level.quantity) for level in levels_from_payload(snapshot.bids)[:limit]]
+    asks = [OrderBookLevel(price=level.price, quantity=level.quantity) for level in levels_from_payload(snapshot.asks)[:limit]]
     return OrderBookStateResponse(
         symbol=symbol.upper(),
-        bids=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in orderbook.top_bids(limit)],
-        asks=[OrderBookLevel(price=level.price, quantity=level.quantity) for level in orderbook.top_asks(limit)],
-        metrics=build_orderbook_metrics_response(metrics),
+        bids=bids,
+        asks=asks,
+        metrics=build_orderbook_metrics_response(parsed_metrics),
     )
 
 

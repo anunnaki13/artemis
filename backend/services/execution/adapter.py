@@ -81,6 +81,17 @@ class ExecutionResult:
     details: dict[str, object]
 
 
+@dataclass(frozen=True)
+class ExecutionCancel:
+    status: str
+    cancelled_at: datetime
+    venue: str
+    client_order_id: str | None
+    venue_order_id: str | None
+    venue_status: str
+    details: dict[str, object]
+
+
 class ExecutionTransport(ABC):
     @abstractmethod
     async def submit_binance_order(self, request: BinanceOrderRequest) -> ExecutionDispatch:
@@ -94,6 +105,10 @@ class ExecutionTransport(ABC):
     ) -> ExecutionResult:
         raise NotImplementedError
 
+    @abstractmethod
+    async def cancel_binance_order(self, intent: ExecutionIntent) -> ExecutionCancel:
+        raise NotImplementedError
+
 
 class ExecutionAdapter(ABC):
     @abstractmethod
@@ -102,6 +117,10 @@ class ExecutionAdapter(ABC):
 
     @abstractmethod
     async def execute(self, intent: ExecutionIntent, dispatch: ExecutionDispatch) -> ExecutionResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def cancel(self, intent: ExecutionIntent) -> ExecutionCancel:
         raise NotImplementedError
 
 
@@ -139,6 +158,17 @@ class StubBinanceExecutionTransport(ExecutionTransport):
                 **dispatch.details,
                 "simulated_fill": True,
             },
+        )
+
+    async def cancel_binance_order(self, intent: ExecutionIntent) -> ExecutionCancel:
+        return ExecutionCancel(
+            status="cancelled",
+            cancelled_at=datetime.now(tz=timezone.utc),
+            venue="binance",
+            client_order_id=intent.client_order_id,
+            venue_order_id=intent.venue_order_id,
+            venue_status="CANCELED",
+            details={"transport": "stub", "simulated_cancel": True},
         )
 
 
@@ -198,6 +228,54 @@ class BinanceAuthenticatedExecutionTransport(ExecutionTransport):
     ) -> ExecutionResult:
         raise RuntimeError("authenticated binance transport requires asynchronous venue reconciliation")
 
+    async def cancel_binance_order(self, intent: ExecutionIntent) -> ExecutionCancel:
+        payload: dict[str, str | int] = {
+            "symbol": intent.symbol,
+            "recvWindow": 5000,
+            "timestamp": int(datetime.now(tz=timezone.utc).timestamp() * 1000),
+        }
+        if intent.client_order_id:
+            payload["origClientOrderId"] = intent.client_order_id
+        elif intent.venue_order_id:
+            payload["orderId"] = intent.venue_order_id
+        else:
+            raise ValueError("dispatching intent is missing client_order_id and venue_order_id")
+        query = urlencode(payload)
+        signature = hmac.new(self.api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+        payload["signature"] = signature
+        headers = {"X-MBX-APIKEY": self.api_key}
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=15.0,
+            transport=self.http_transport,
+        ) as client:
+            response = await client.delete("/api/v3/order", params=payload, headers=headers)
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                try:
+                    error_body: object = response.json()
+                except ValueError:
+                    error_body = response.text
+                raise ExecutionTransportError(
+                    "binance order cancellation failed",
+                    venue="binance",
+                    status_code=response.status_code,
+                    response_body=error_body,
+                ) from exc
+            body = response.json()
+        if not isinstance(body, dict):
+            raise ValueError("unexpected binance cancel response")
+        return ExecutionCancel(
+            status="cancelled",
+            cancelled_at=datetime.now(tz=timezone.utc),
+            venue="binance",
+            client_order_id=str(body.get("clientOrderId", intent.client_order_id or "")) or intent.client_order_id,
+            venue_order_id=str(body.get("orderId", intent.venue_order_id or "")) or intent.venue_order_id,
+            venue_status=str(body.get("status", "CANCELED")),
+            details={"transport": "authenticated", "response": body},
+        )
+
 
 class BinanceExecutionAdapter(ExecutionAdapter):
     def __init__(
@@ -214,6 +292,9 @@ class BinanceExecutionAdapter(ExecutionAdapter):
 
     async def execute(self, intent: ExecutionIntent, dispatch: ExecutionDispatch) -> ExecutionResult:
         return await self.transport.simulate_fill(intent, dispatch)
+
+    async def cancel(self, intent: ExecutionIntent) -> ExecutionCancel:
+        return await self.transport.cancel_binance_order(intent)
 
     def build_order_request(self, intent: ExecutionIntent) -> BinanceOrderRequest:
         timestamp = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
@@ -273,4 +354,15 @@ class PaperExecutionAdapter(ExecutionAdapter):
                 **dispatch.details,
                 "accepted_at": dispatch.accepted_at.isoformat(),
             },
+        )
+
+    async def cancel(self, intent: ExecutionIntent) -> ExecutionCancel:
+        return ExecutionCancel(
+            status="cancelled",
+            cancelled_at=datetime.now(tz=timezone.utc),
+            venue="paper",
+            client_order_id=intent.client_order_id,
+            venue_order_id=intent.venue_order_id,
+            venue_status="CANCELED",
+            details={"mode": "paper", "source": "cancel"},
         )

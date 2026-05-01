@@ -1,17 +1,31 @@
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ExecutionIntent, ExecutionVenueEvent, User
-from app.schemas.execution import ExecutionIntentRead, ExecutionVenueEventRead, VenueEventState
+from app.schemas.execution import (
+    ExecutionIntentRead,
+    ExecutionVenueEventRead,
+    LifecycleStatus,
+    VenueEventState,
+)
 from app.schemas.risk import SignalRiskEvaluateRequest, SignalRiskEvaluateResponse
 from app.schemas.risk import SignalRiskEvaluateResponse as RiskResponseSchema
 from services.audit import write_audit_log
 from strategies.base import Signal
 
-IntentStatus = Literal["queued", "approved", "rejected", "cancelled", "dispatching", "executed", "failed"]
+IntentStatus = Literal[
+    "queued",
+    "approved",
+    "rejected",
+    "cancel_requested",
+    "cancelled",
+    "dispatching",
+    "executed",
+    "failed",
+]
 
 
 class ExecutionIntentQueueService:
@@ -73,6 +87,7 @@ class ExecutionIntentQueueService:
         risk_request: SignalRiskEvaluateRequest,
         risk_response: SignalRiskEvaluateResponse,
         notes: str | None,
+        parent_intent_id: int | None = None,
     ) -> ExecutionIntent:
         intent = self.build_intent(
             user=user,
@@ -80,6 +95,7 @@ class ExecutionIntentQueueService:
             risk_response=risk_response,
             notes=notes,
         )
+        intent.parent_intent_id = parent_intent_id
         session.add(intent)
         await session.flush()
         await write_audit_log(
@@ -116,6 +132,8 @@ class ExecutionIntentQueueService:
             intent.execution_venue = execution_venue
         if status == "dispatching":
             intent.dispatched_at = datetime.now(tz=timezone.utc)
+        if status == "cancelled":
+            intent.cancelled_at = datetime.now(tz=timezone.utc)
         if status == "executed":
             intent.executed_at = datetime.now(tz=timezone.utc)
         if execution_payload is not None:
@@ -124,6 +142,26 @@ class ExecutionIntentQueueService:
         await write_audit_log(
             session,
             action="execution_intent.status_updated",
+            entity="execution_intent",
+            entity_id=str(intent.id),
+            before_state=before_state,
+            after_state=self.to_read(intent).model_dump(),
+        )
+        return intent
+
+    async def link_replacement(
+        self,
+        session: AsyncSession,
+        *,
+        intent: ExecutionIntent,
+        replacement_intent: ExecutionIntent,
+    ) -> ExecutionIntent:
+        before_state = self.to_read(intent).model_dump()
+        intent.replaced_by_intent_id = int(replacement_intent.id) if intent.id is not None else None
+        await session.flush()
+        await write_audit_log(
+            session,
+            action="execution_intent.replaced",
             entity="execution_intent",
             entity_id=str(intent.id),
             before_state=before_state,
@@ -199,7 +237,8 @@ class ExecutionIntentQueueService:
         allowed_transitions: dict[str, set[str]] = {
             "queued": {"approved", "rejected", "cancelled"},
             "approved": {"dispatching", "cancelled"},
-            "dispatching": {"executed", "failed", "cancelled"},
+            "dispatching": {"executed", "failed", "cancel_requested", "cancelled"},
+            "cancel_requested": {"cancelled", "failed", "executed"},
             "rejected": set(),
             "cancelled": set(),
             "executed": set(),
@@ -214,7 +253,7 @@ class ExecutionIntentQueueService:
             updated_at=intent.updated_at,
             symbol=intent.symbol,
             side=intent.side,
-            status=intent.status,
+            status=cast(LifecycleStatus, intent.status),
             source_strategy=intent.source_strategy,
             requested_notional=intent.requested_notional,
             approved_notional=intent.approved_notional,
@@ -224,6 +263,11 @@ class ExecutionIntentQueueService:
             execution_venue=intent.execution_venue,
             dispatched_at=intent.dispatched_at,
             executed_at=intent.executed_at,
+            cancelled_at=intent.cancelled_at,
+            parent_intent_id=int(intent.parent_intent_id) if intent.parent_intent_id is not None else None,
+            replaced_by_intent_id=(
+                int(intent.replaced_by_intent_id) if intent.replaced_by_intent_id is not None else None
+            ),
             owner_user_id=intent.owner_user_id,
             signal=Signal.model_validate(intent.signal_payload),
             risk=RiskResponseSchema.model_validate(intent.risk_payload),
@@ -243,6 +287,6 @@ class ExecutionIntentQueueService:
             symbol=event.symbol,
             client_order_id=event.client_order_id,
             venue_order_id=event.venue_order_id,
-            reconcile_state=event.reconcile_state,
+            reconcile_state=cast(VenueEventState, event.reconcile_state),
             payload=event.payload,
         )

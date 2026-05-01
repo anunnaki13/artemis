@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.models import ExecutionIntent
 from services.execution.adapter import (
     BinanceExecutionAdapter,
+    ExecutionCancel,
     ExecutionAdapter,
     ExecutionTransportError,
     PaperExecutionAdapter,
@@ -156,7 +157,7 @@ class ExecutionWorkerService:
         client_order_id: str | None,
         details: dict[str, object],
     ) -> tuple[ExecutionIntent, Literal["applied", "ignored"]]:
-        if intent.status != "dispatching":
+        if intent.status not in {"dispatching", "cancel_requested"}:
             return intent, "ignored"
 
         terminal_status = self.map_terminal_venue_status(venue_status)
@@ -214,6 +215,102 @@ class ExecutionWorkerService:
         if normalized in {"REJECTED", "EXPIRED_IN_MATCH"}:
             return "failed"
         return None
+
+    async def request_cancel(
+        self,
+        session: AsyncSession,
+        *,
+        intent: ExecutionIntent,
+        reason: str | None,
+    ) -> ExecutionIntent:
+        cancel_reason = reason or "cancel requested by operator"
+        if intent.status in {"queued", "approved"}:
+            return await self.queue_service.update_status(
+                session,
+                intent=intent,
+                status="cancelled",
+                notes=cancel_reason,
+                execution_payload={
+                    "status": "cancelled",
+                    "reason": cancel_reason,
+                    "cancelled_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "venue": intent.execution_venue,
+                    "client_order_id": intent.client_order_id,
+                    "venue_order_id": intent.venue_order_id,
+                    "source": "cancel_request",
+                },
+            )
+        if intent.status != "dispatching":
+            raise ValueError(f"cancel requires queued, approved, or dispatching status, got {intent.status}")
+
+        pending = await self.queue_service.update_status(
+            session,
+            intent=intent,
+            status="cancel_requested",
+            notes=cancel_reason,
+            execution_payload={
+                "status": "cancel_requested",
+                "reason": cancel_reason,
+                "requested_at": datetime.now(tz=timezone.utc).isoformat(),
+                "venue": intent.execution_venue,
+                "client_order_id": intent.client_order_id,
+                "venue_order_id": intent.venue_order_id,
+                "source": "cancel_request",
+            },
+        )
+        try:
+            cancel = await self.adapter.cancel(pending)
+        except ExecutionTransportError as exc:
+            return await self.queue_service.update_execution_metadata(
+                session,
+                intent=pending,
+                notes=cancel_reason,
+                execution_payload={
+                    "status": "cancel_requested",
+                    "reason": cancel_reason,
+                    "venue": exc.venue,
+                    "status_code": exc.status_code,
+                    "response_body": exc.response_body,
+                    "requested_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "source": "cancel_request_error",
+                },
+                execution_venue=exc.venue,
+            )
+        return await self._apply_cancel_result(
+            session,
+            intent=pending,
+            cancel=cancel,
+            reason=cancel_reason,
+        )
+
+    async def _apply_cancel_result(
+        self,
+        session: AsyncSession,
+        *,
+        intent: ExecutionIntent,
+        cancel: ExecutionCancel,
+        reason: str | None,
+    ) -> ExecutionIntent:
+        return await self.queue_service.update_status(
+            session,
+            intent=intent,
+            status="cancelled",
+            notes=reason or intent.notes,
+            execution_payload={
+                "status": cancel.status,
+                "reason": reason,
+                "cancelled_at": cancel.cancelled_at.isoformat(),
+                "venue": cancel.venue,
+                "venue_status": cancel.venue_status,
+                "client_order_id": cancel.client_order_id,
+                "venue_order_id": cancel.venue_order_id,
+                "details": cancel.details,
+                "source": "venue_cancel",
+            },
+            client_order_id=cancel.client_order_id,
+            venue_order_id=cancel.venue_order_id,
+            execution_venue=cancel.venue,
+        )
 
     async def fail_stale_dispatches(self, session: AsyncSession) -> list[ExecutionIntent]:
         cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=self.dispatch_timeout_seconds)

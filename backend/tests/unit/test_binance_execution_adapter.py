@@ -91,6 +91,21 @@ async def test_binance_execution_adapter_dispatch_and_execute() -> None:
     assert result.client_order_id == dispatch.client_order_id
 
 
+async def test_binance_execution_adapter_cancels_dispatched_order() -> None:
+    adapter = BinanceExecutionAdapter(transport=StubBinanceExecutionTransport())
+    intent = build_intent()
+    intent.client_order_id = "client-42"
+    intent.venue_order_id = "venue-42"
+
+    cancelled = await adapter.cancel(intent)
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.venue == "binance"
+    assert cancelled.venue_status == "CANCELED"
+    assert cancelled.client_order_id == "client-42"
+    assert cancelled.venue_order_id == "venue-42"
+
+
 async def test_authenticated_binance_transport_submits_signed_order() -> None:
     captured: dict[str, object] = {}
 
@@ -147,3 +162,41 @@ async def test_authenticated_binance_transport_raises_on_http_error() -> None:
         assert exc.response_body == {"code": -2010, "msg": "Account has insufficient balance"}
     else:
         raise AssertionError("expected ExecutionTransportError")
+
+
+async def test_authenticated_binance_transport_cancels_signed_order() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["query"] = str(request.url.query)
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={
+                "symbol": "BTCUSDT",
+                "orderId": "123456",
+                "clientOrderId": "client-1",
+                "status": "CANCELED",
+            },
+        )
+
+    transport = BinanceAuthenticatedExecutionTransport(
+        api_key="api-key",
+        api_secret="api-secret",
+        base_url="https://api.binance.com",
+        http_transport=httpx.MockTransport(handler),
+    )
+    intent = build_intent()
+    intent.client_order_id = "client-1"
+    intent.venue_order_id = "123456"
+
+    cancelled = await transport.cancel_binance_order(intent)
+
+    assert captured["method"] == "DELETE"
+    assert "signature=" in str(captured["query"])
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["x-mbx-apikey"] == "api-key"
+    assert cancelled.venue_status == "CANCELED"
+    assert cancelled.client_order_id == "client-1"

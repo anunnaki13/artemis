@@ -28,6 +28,7 @@ def test_signal_risk_gate_allows_valid_standard_signal() -> None:
             entry_price=Decimal("100"),
             proposed_notional=Decimal("500"),
             current_open_positions=1,
+            current_total_exposure_notional=Decimal("500"),
             daily_pnl_pct=Decimal("0"),
             leverage=Decimal("1"),
             quote_volume_usd=Decimal("50000000"),
@@ -38,6 +39,8 @@ def test_signal_risk_gate_allows_valid_standard_signal() -> None:
 
     assert decision.allowed is True
     assert decision.computed_r_multiple == Decimal("3")
+    assert decision.evaluated_open_positions == 1
+    assert decision.evaluated_total_exposure_notional == Decimal("500")
 
 
 def test_signal_risk_gate_blocks_micro_profile_for_multiple_reasons() -> None:
@@ -57,6 +60,7 @@ def test_signal_risk_gate_blocks_micro_profile_for_multiple_reasons() -> None:
             entry_price=Decimal("100"),
             proposed_notional=Decimal("20"),
             current_open_positions=1,
+            current_total_exposure_notional=Decimal("95"),
             daily_pnl_pct=Decimal("-0.06"),
             leverage=Decimal("4"),
             quote_volume_usd=Decimal("1000000"),
@@ -71,3 +75,4 @@ def test_signal_risk_gate_blocks_micro_profile_for_multiple_reasons() -> None:
     assert "daily pnl breaches absolute max daily loss" in decision.reasons
     assert "futures usage is blocked for active capital profile" in decision.reasons
     assert "trade target R is below capital profile minimum" in decision.reasons
+    assert "proposed trade exceeds hard max total exposure" in decision.reasons
