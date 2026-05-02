@@ -114,6 +114,7 @@ export type DashboardSummaryResponse = {
     ret_code: number | null;
     ret_msg: string | null;
   }>;
+  recovery: RecoveryEventResponse | null;
   digest_runs: Array<{
     report_date: string;
     generated_at: string;
@@ -208,6 +209,10 @@ export type ExecutionVenueEventResponse = {
   status_bucket: "accepted" | "partial" | "filled" | "cancelled" | "rejected" | "pending" | "unknown";
   ret_code: number | null;
   ret_msg: string | null;
+  incident_type: string | null;
+  severity: "low" | "medium" | "high" | null;
+  retryable: boolean;
+  suggested_action: "retry_later" | "reduce_size" | "refresh_order_state" | "fix_request" | "manual_review" | null;
   payload: Record<string, unknown>;
 };
 
@@ -520,6 +525,263 @@ export type DailyDigestPreviewResponse = {
   }>;
 };
 
+export type RiskPolicyResponse = {
+  risk_per_trade: number;
+  max_daily_loss: number;
+  hard_limits: {
+    max_position_pct: number;
+    max_total_exposure_pct: number;
+    max_leverage: number;
+    absolute_max_daily_loss: number;
+  };
+};
+
+export type CapitalProfileResponse = {
+  current_equity: string;
+  active_profile: {
+    name: string;
+    equity_min: string;
+    equity_max: string | null;
+    min_notional_buffer: string;
+    max_concurrent_positions: number;
+    risk_per_trade_pct: string;
+    min_trade_target_r: string;
+    preferred_fee_tier: string;
+    stablecoin_only_in_idle: boolean;
+    avoid_pairs_below_volume: string;
+    use_futures: boolean | "optional";
+    forbidden_strategies: string[];
+  };
+  fee_strategy: {
+    default_order_type: string;
+    taker_fallback_after_seconds: number;
+    taker_fallback_only_if: string;
+    use_bnb_for_fees: boolean;
+    maintain_bnb_balance_usd: string;
+    vip_tier_target: string;
+  };
+  enforcement_notes: string[];
+};
+
+export type StrategyEvaluationResponse = {
+  strategy: string;
+  signal: {
+    symbol: string;
+    side: "long" | "short";
+    conviction: number;
+    source: string;
+    regime: string;
+    suggested_stop?: number | null;
+    suggested_take_profit?: number | null;
+    metadata: Record<string, unknown>;
+  } | null;
+  diagnostics: {
+    sample_size: number;
+    latest_timestamp: string | null;
+    latest_imbalance_ratio: string | null;
+    average_imbalance_ratio: string | null;
+    latest_spread_bps: string | null;
+    bid_depth_notional_0p5pct: string;
+    ask_depth_notional_0p5pct: string;
+    persistence_ratio_observed: string;
+  };
+};
+
+export type SignalRiskEvaluateResponse = {
+  allowed: boolean;
+  reasons: string[];
+  profile_name: string;
+  recommended_max_notional: string;
+  recommended_risk_amount: string;
+  computed_r_multiple: string | null;
+  evaluated_open_positions: number;
+  evaluated_total_exposure_notional: string;
+};
+
+export type UniverseRefreshResponse = {
+  candidates: Array<{
+    symbol: string;
+    base_asset: string;
+    quote_asset: string;
+    quote_volume: string;
+    price_change_pct: string;
+  }>;
+  candidate_count: number;
+  rejected_count: number;
+  min_quote_volume_usd: string;
+  max_quote_volume_usd: string;
+};
+
+export type TelegramTestResponse = {
+  delivered: boolean;
+  destination: string;
+};
+
+export type AiAnalystRunResponse = {
+  id: number;
+  created_at: string;
+  mode: string;
+  model: string;
+  status: string;
+  question: string | null;
+  response_text: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost_usd: string | null;
+  budget_limit_usd: string | null;
+  budget_spent_before_usd: string | null;
+  review_status: "pending" | "approved" | "rejected" | "follow_up";
+  reviewed_at: string | null;
+  reviewed_by_user_id: string | null;
+  review_notes: string | null;
+  error_message: string | null;
+};
+
+export type AiAnalystBudgetResponse = {
+  limit_usd: string;
+  spent_today_usd: string;
+  remaining_usd: string;
+};
+
+export type AiAnalystBriefResponse = {
+  run: AiAnalystRunResponse;
+  budget: AiAnalystBudgetResponse;
+  context_summary: Record<string, unknown>;
+};
+
+export type ExecutionIntentSubmitResponse = {
+  queued: boolean;
+  risk: SignalRiskEvaluateResponse;
+  intent: ExecutionIntentResponse | null;
+};
+
+export type BybitExecutionPreviewResponse = {
+  symbol: string;
+  side: string;
+  base_url: string;
+  testnet: boolean;
+  live_transport_enabled: boolean;
+  transport_mode: string;
+  client_order_id: string;
+  unsigned_payload: Record<string, string | number>;
+  signed_payload_keys: string[];
+};
+
+export type BacktestRunResponse = {
+  id: number;
+  created_at: string;
+  status: string;
+  symbol: string;
+  timeframe: string;
+  strategy_name: string;
+  sample_size: number;
+  summary_payload: Record<string, unknown>;
+  notes: string | null;
+};
+
+export type BacktestGroupResponse = {
+  group_key: string;
+  runs_count: number;
+  average_return_pct: string;
+  best_return_pct: string;
+  worst_return_pct: string;
+  average_range_pct: string;
+  average_drawdown_pct: string;
+  average_volatility_pct: string;
+  average_sample_size: string;
+};
+
+export type BacktestOverviewResponse = {
+  symbol: string;
+  filtered_runs_count: number;
+  available_strategies: string[];
+  available_timeframes: string[];
+  strategy_groups: BacktestGroupResponse[];
+  timeframe_groups: BacktestGroupResponse[];
+};
+
+export type BacktestWalkForwardWindowResponse = {
+  window_index: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  return_pct: string;
+  max_drawdown_pct: string;
+  volatility_pct: string;
+  trades_count: number | null;
+  win_rate_pct: string | null;
+};
+
+export type BacktestWalkForwardResponse = {
+  symbol: string;
+  timeframe: string;
+  strategy_name: string;
+  lookback_limit: number;
+  train_size: number;
+  test_size: number;
+  step_size: number;
+  windows_count: number;
+  positive_windows_count: number;
+  average_return_pct: string;
+  best_return_pct: string;
+  worst_return_pct: string;
+  average_drawdown_pct: string;
+  average_volatility_pct: string;
+  average_win_rate_pct: string | null;
+  windows: BacktestWalkForwardWindowResponse[];
+};
+
+export type RecoveryEventResponse = {
+  id: number;
+  created_at: string;
+  status: "ok" | "warn" | "critical";
+  severity: "low" | "medium" | "high";
+  flags: string[];
+  summary_payload: Record<string, unknown>;
+  heartbeat_ping_ok: boolean | null;
+  dead_man_delivered: boolean | null;
+  telegram_delivered: boolean | null;
+};
+
+export type ExecutionDispatchResponse = {
+  dispatched: boolean;
+  intent: ExecutionIntentResponse | null;
+  detail: string;
+};
+
+export type ExecutionTimeoutSweepResponse = {
+  timed_out_count: number;
+  intents: ExecutionIntentResponse[];
+};
+
+export type SpotAccountBalanceResponse = {
+  asset: string;
+  free: string;
+  locked: string;
+  total: string;
+  total_value_usd: string | null;
+  last_delta: string | null;
+  updated_at: string;
+  source_event: string | null;
+};
+
+export type SpotSymbolPositionResponse = {
+  symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  net_quantity: string;
+  average_entry_price: string | null;
+  last_mark_price: string | null;
+  quote_exposure_usd: string | null;
+  market_value_usd: string | null;
+  realized_notional: string;
+  realized_pnl_usd: string;
+  unrealized_pnl_usd: string | null;
+  updated_at: string;
+  source_event: string | null;
+};
+
 async function parseApiError(response: Response) {
   try {
     const payload = (await response.json()) as { detail?: unknown };
@@ -609,7 +871,23 @@ export async function listDailyDigestRunsFiltered(options?: {
   if (options?.flaggedOnly) {
     params.set("flagged_only", "true");
   }
-  return apiFetch<DailyDigestArtifactResponse[]>(`/reports/daily-digest/runs?${params.toString()}`);
+  try {
+    return await apiFetch<DailyDigestArtifactResponse[]>(`/reports/daily-digest/runs?${params.toString()}`);
+  } catch {
+    const artifacts = await listDailyDigestArtifacts(Math.min(options?.limit ?? 365, 50));
+    return artifacts.filter((item) => {
+      if (options?.flaggedOnly && (item.anomaly_score ?? 0) <= 0) {
+        return false;
+      }
+      if (options?.startAt && item.report_date < options.startAt) {
+        return false;
+      }
+      if (options?.endAt && item.report_date > options.endAt) {
+        return false;
+      }
+      return true;
+    });
+  }
 }
 
 export async function runDailyDigest(reportDate?: string): Promise<DailyDigestArtifactResponse> {
@@ -638,6 +916,68 @@ export async function getExecutionIntents(limit = 8): Promise<ExecutionIntentRes
   return apiFetch<ExecutionIntentResponse[]>(`/execution/intents?limit=${limit}`);
 }
 
+export async function submitExecutionIntent(payload: {
+  signal_risk: {
+    signal: {
+      symbol: string;
+      side: "long" | "short";
+      conviction: number;
+      source: string;
+      regime: string;
+      suggested_stop?: number | null;
+      suggested_take_profit?: number | null;
+      metadata?: Record<string, unknown>;
+    };
+    current_equity: string;
+    entry_price: string;
+    proposed_notional: string;
+    current_open_positions?: number;
+    current_total_exposure_notional?: string;
+    daily_pnl_pct?: string;
+    leverage?: string;
+    quote_volume_usd?: string;
+    use_futures?: boolean;
+  };
+  notes?: string;
+}): Promise<ExecutionIntentSubmitResponse> {
+  return apiFetch<ExecutionIntentSubmitResponse>("/execution/intents/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateExecutionIntentStatus(
+  intentId: number,
+  payload: { status: "approved" | "rejected" | "cancelled" | "executed" | "failed"; notes?: string }
+): Promise<ExecutionIntentResponse> {
+  return apiFetch<ExecutionIntentResponse>(`/execution/intents/${intentId}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: payload.status, notes: payload.notes ?? null }),
+  });
+}
+
+export async function cancelExecutionIntent(intentId: number, reason?: string): Promise<ExecutionIntentResponse> {
+  return apiFetch<ExecutionIntentResponse>(`/execution/intents/${intentId}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason ?? null }),
+  });
+}
+
+export async function dispatchNextExecutionIntent(): Promise<ExecutionDispatchResponse> {
+  return apiFetch<ExecutionDispatchResponse>("/execution/worker/dispatch-next", {
+    method: "POST",
+  });
+}
+
+export async function failStaleExecutionIntents(): Promise<ExecutionTimeoutSweepResponse> {
+  return apiFetch<ExecutionTimeoutSweepResponse>("/execution/worker/fail-stale", {
+    method: "POST",
+  });
+}
+
 export async function getExecutionIntentByOrderId(options: {
   clientOrderId?: string | null;
   venueOrderId?: string | null;
@@ -652,8 +992,24 @@ export async function getExecutionIntentByOrderId(options: {
   return apiFetch<ExecutionIntentResponse>(`/execution/intents/by-order-id?${params.toString()}`);
 }
 
+export async function getBybitExecutionPreview(intentId: number): Promise<BybitExecutionPreviewResponse> {
+  return apiFetch<BybitExecutionPreviewResponse>(`/execution/venues/bybit/intents/${intentId}/preview-order`);
+}
+
 export async function getOrderbook(symbol: string, limit = 8): Promise<OrderBookResponse> {
   return apiFetch<OrderBookResponse>(`/market-data/orderbook/${symbol}?limit=${limit}`);
+}
+
+export async function getSpotAccountBalances(limit = 25): Promise<SpotAccountBalanceResponse[]> {
+  return apiFetch<SpotAccountBalanceResponse[]>(`/execution/account/balances?limit=${limit}`);
+}
+
+export async function getSpotSymbolPositions(limit = 25, refreshMarks = true): Promise<SpotSymbolPositionResponse[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    refresh_marks: refreshMarks ? "true" : "false",
+  });
+  return apiFetch<SpotSymbolPositionResponse[]>(`/execution/account/positions?${params.toString()}`);
 }
 
 export async function getLiquidityHistory(symbol: string, limit = 24): Promise<LiquidityPointResponse[]> {
@@ -827,6 +1183,9 @@ export async function getExecutionVenueEvents(options?: {
   query?: string;
   reconcileState?: "pending" | "applied" | "ignored" | "unmatched";
   statusBucket?: "accepted" | "partial" | "filled" | "cancelled" | "rejected" | "pending" | "unknown";
+  retryableOnly?: boolean;
+  severity?: "low" | "medium" | "high";
+  suggestedAction?: "retry_later" | "reduce_size" | "refresh_order_state" | "fix_request" | "manual_review";
 }): Promise<ExecutionVenueEventResponse[]> {
   const params = new URLSearchParams({ limit: String(options?.limit ?? 50) });
   if (options?.offset) {
@@ -847,7 +1206,211 @@ export async function getExecutionVenueEvents(options?: {
   if (options?.statusBucket) {
     params.set("status_bucket", options.statusBucket);
   }
+  if (options?.retryableOnly) {
+    params.set("retryable_only", "true");
+  }
+  if (options?.severity) {
+    params.set("severity", options.severity);
+  }
+  if (options?.suggestedAction) {
+    params.set("suggested_action", options.suggestedAction);
+  }
   return apiFetch<ExecutionVenueEventResponse[]>(`/execution/venues/events?${params.toString()}`);
+}
+
+export async function getRiskPolicy(): Promise<RiskPolicyResponse> {
+  return apiFetch<RiskPolicyResponse>("/risk/policy");
+}
+
+export async function getCapitalProfile(currentEquity = "100"): Promise<CapitalProfileResponse> {
+  return apiFetch<CapitalProfileResponse>(`/risk/capital-profile?current_equity=${encodeURIComponent(currentEquity)}`);
+}
+
+export async function evaluateOrderbookImbalance(payload: {
+  symbol: string;
+  lookback?: number;
+  min_abs_imbalance?: string;
+  max_spread_bps?: string;
+  min_depth_notional_usd?: string;
+  persistence_ratio?: string;
+}): Promise<StrategyEvaluationResponse> {
+  return apiFetch<StrategyEvaluationResponse>("/strategies/orderbook-imbalance/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function evaluateSignalRisk(payload: {
+  signal: {
+    symbol: string;
+    side: "long" | "short";
+    conviction: number;
+    source: string;
+    regime: string;
+    suggested_stop?: number | null;
+    suggested_take_profit?: number | null;
+    metadata?: Record<string, unknown>;
+  };
+  current_equity: string;
+  entry_price: string;
+  proposed_notional: string;
+  current_open_positions?: number;
+  current_total_exposure_notional?: string;
+  daily_pnl_pct?: string;
+  leverage?: string;
+  quote_volume_usd?: string;
+  use_futures?: boolean;
+}): Promise<SignalRiskEvaluateResponse> {
+  return apiFetch<SignalRiskEvaluateResponse>("/risk/evaluate-signal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function refreshUniverse(): Promise<UniverseRefreshResponse> {
+  return apiFetch<UniverseRefreshResponse>("/edge/universe/refresh", { method: "POST" });
+}
+
+export async function sendTelegramTest(message: string): Promise<TelegramTestResponse> {
+  return apiFetch<TelegramTestResponse>("/notifications/telegram/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function getAiAnalystRuns(limit = 20): Promise<AiAnalystRunResponse[]> {
+  return apiFetch<AiAnalystRunResponse[]>(`/ai-analyst/runs?limit=${limit}`);
+}
+
+export async function getAiAnalystQueue(limit = 20): Promise<AiAnalystRunResponse[]> {
+  return apiFetch<AiAnalystRunResponse[]>(`/ai-analyst/queue?limit=${limit}`);
+}
+
+export async function getAiAnalystBudget(): Promise<AiAnalystBudgetResponse> {
+  return apiFetch<AiAnalystBudgetResponse>("/ai-analyst/budget");
+}
+
+export async function generateAiAnalystBrief(payload?: {
+  mode?: "fast" | "primary" | "heavy";
+  question?: string;
+}): Promise<AiAnalystBriefResponse> {
+  return apiFetch<AiAnalystBriefResponse>("/ai-analyst/brief", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode: payload?.mode ?? "primary",
+      question: payload?.question?.trim() || null,
+    }),
+  });
+}
+
+export async function reviewAiAnalystRun(
+  runId: number,
+  payload: {
+    review_status: "approved" | "rejected" | "follow_up";
+    review_notes?: string;
+  },
+): Promise<AiAnalystRunResponse> {
+  return apiFetch<AiAnalystRunResponse>(`/ai-analyst/runs/${runId}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      review_status: payload.review_status,
+      review_notes: payload.review_notes?.trim() || null,
+    }),
+  });
+}
+
+export async function getRecoveryStatus(): Promise<RecoveryEventResponse | null> {
+  return apiFetch<RecoveryEventResponse | null>("/recovery/status");
+}
+
+export async function getRecoveryEvents(limit = 20, options?: {
+  status?: "ok" | "warn" | "critical";
+  severity?: "low" | "medium" | "high";
+}): Promise<RecoveryEventResponse[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (options?.status) params.set("status", options.status);
+  if (options?.severity) params.set("severity", options.severity);
+  return apiFetch<RecoveryEventResponse[]>(`/recovery/events?${params.toString()}`);
+}
+
+export async function runRecoveryCheck(): Promise<RecoveryEventResponse> {
+  return apiFetch<RecoveryEventResponse>("/recovery/checks/run", { method: "POST" });
+}
+
+export async function runBacktest(payload?: {
+  symbol?: string;
+  timeframe?: string;
+  limit?: number;
+  strategy_name?: string;
+  notes?: string;
+}): Promise<BacktestRunResponse> {
+  return apiFetch<BacktestRunResponse>("/backtest/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      symbol: payload?.symbol ?? "BTCUSDT",
+      timeframe: payload?.timeframe ?? "1m",
+      limit: payload?.limit ?? 240,
+      strategy_name: payload?.strategy_name ?? "buy_and_hold",
+      notes: payload?.notes ?? null,
+    }),
+  });
+}
+
+export async function runBacktestWalkForward(payload?: {
+  symbol?: string;
+  timeframe?: string;
+  lookback_limit?: number;
+  train_size?: number;
+  test_size?: number;
+  step_size?: number;
+  strategy_name?: string;
+}): Promise<BacktestWalkForwardResponse> {
+  return apiFetch<BacktestWalkForwardResponse>("/backtest/walk-forward", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      symbol: payload?.symbol ?? "BTCUSDT",
+      timeframe: payload?.timeframe ?? "1m",
+      lookback_limit: payload?.lookback_limit ?? 720,
+      train_size: payload?.train_size ?? 240,
+      test_size: payload?.test_size ?? 60,
+      step_size: payload?.step_size ?? 60,
+      strategy_name: payload?.strategy_name ?? "buy_and_hold",
+    }),
+  });
+}
+
+export async function getBacktestRuns(limit = 20, symbol?: string): Promise<BacktestRunResponse[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (symbol) {
+    params.set("symbol", symbol);
+  }
+  return apiFetch<BacktestRunResponse[]>(`/backtest/runs?${params.toString()}`);
+}
+
+export async function getBacktestOverview(options?: {
+  symbol?: string;
+  strategyName?: string;
+  timeframe?: string;
+  limit?: number;
+}): Promise<BacktestOverviewResponse> {
+  const params = new URLSearchParams({
+    symbol: options?.symbol ?? "BTCUSDT",
+    limit: String(options?.limit ?? 100),
+  });
+  if (options?.strategyName && options.strategyName !== "all") {
+    params.set("strategy_name", options.strategyName);
+  }
+  if (options?.timeframe && options.timeframe !== "all") {
+    params.set("timeframe", options.timeframe);
+  }
+  return apiFetch<BacktestOverviewResponse>(`/backtest/overview?${params.toString()}`);
 }
 
 export async function registerOwner(payload: RegisterPayload): Promise<RegisterResponse> {

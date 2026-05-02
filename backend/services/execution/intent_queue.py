@@ -9,6 +9,8 @@ from app.schemas.execution import (
     ExecutionIntentRead,
     ExecutionVenueEventRead,
     LifecycleStatus,
+    VenueIncidentAction,
+    VenueIncidentSeverity,
     VenueEventState,
     VenueStatusBucket,
 )
@@ -30,6 +32,36 @@ IntentStatus = Literal[
 
 
 class ExecutionIntentQueueService:
+    def classify_venue_incident(
+        self,
+        *,
+        venue_status: str,
+        ret_code: int | None,
+        ret_msg: str | None,
+        status_code: int | None = None,
+    ) -> tuple[str | None, VenueIncidentSeverity | None, bool, VenueIncidentAction | None]:
+        normalized_status = venue_status.strip().upper()
+        normalized_msg = (ret_msg or "").strip().lower()
+        if normalized_status in {"FILLED", "NEW", "ACCEPTED"} and ret_code in {None, 0}:
+            return None, None, False, None
+        if ret_code in {10001} or "insufficient balance" in normalized_msg:
+            return "insufficient_balance", "high", False, "reduce_size"
+        if ret_code in {10002, 10003, 10004} or "invalid" in normalized_msg or "parameter" in normalized_msg:
+            return "invalid_request", "high", False, "fix_request"
+        if ret_code in {10006, 10016, 429} or status_code == 429 or "rate limit" in normalized_msg or "too many" in normalized_msg:
+            return "rate_limited", "medium", True, "retry_later"
+        if ret_code in {10000, 10017} or "timeout" in normalized_msg or "temporar" in normalized_msg:
+            return "transient_transport", "medium", True, "retry_later"
+        if ret_code in {110001} or "order not exists" in normalized_msg or "order not found" in normalized_msg:
+            return "order_state_mismatch", "medium", False, "refresh_order_state"
+        if normalized_status in {"REJECTED", "FAILED"}:
+            return "venue_rejected", "high", False, "manual_review"
+        if normalized_status in {"CANCELED", "CANCELLED", "EXPIRED"}:
+            return "cancelled_or_expired", "low", False, "manual_review"
+        if normalized_status in {"PARTIALLY_FILLED", "PARTIALFILLED"}:
+            return "partial_fill", "medium", False, "manual_review"
+        return "unknown_incident", "medium", False, "manual_review"
+
     def classify_venue_status(self, venue_status: str) -> VenueStatusBucket:
         normalized = venue_status.strip().upper()
         if normalized in {"NEW", "CREATED", "ACCEPTED", "PARTIALLY_FILLED", "PARTIALFILLED"}:
@@ -62,6 +94,20 @@ class ExecutionIntentQueueService:
         ret_code = payload.get("retCode")
         ret_msg = payload.get("retMsg")
         return self._parse_ret_code(ret_code), str(ret_msg) if ret_msg is not None else None
+
+    def extract_http_status_code(self, payload: dict[str, Any]) -> int | None:
+        details = payload.get("details")
+        if isinstance(details, dict):
+            raw = details.get("status_code")
+            try:
+                return int(str(raw)) if raw is not None else None
+            except (TypeError, ValueError):
+                return None
+        raw = payload.get("status_code")
+        try:
+            return int(str(raw)) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
 
     def _parse_ret_code(self, value: object) -> int | None:
         if value is None:
@@ -319,6 +365,13 @@ class ExecutionIntentQueueService:
 
     def to_venue_event_read(self, event: ExecutionVenueEvent) -> ExecutionVenueEventRead:
         ret_code, ret_msg = self.extract_venue_diagnostics(event.payload)
+        status_code = self.extract_http_status_code(event.payload)
+        incident_type, severity, retryable, suggested_action = self.classify_venue_incident(
+            venue_status=event.venue_status,
+            ret_code=ret_code,
+            ret_msg=ret_msg,
+            status_code=status_code,
+        )
         return ExecutionVenueEventRead(
             id=int(event.id),
             created_at=event.created_at,
@@ -334,5 +387,9 @@ class ExecutionIntentQueueService:
             status_bucket=self.classify_venue_status(event.venue_status),
             ret_code=ret_code,
             ret_msg=ret_msg,
+            incident_type=incident_type,
+            severity=severity,
+            retryable=retryable,
+            suggested_action=suggested_action,
             payload=event.payload,
         )

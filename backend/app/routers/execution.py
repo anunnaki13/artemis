@@ -147,6 +147,9 @@ def filter_venue_event_rows(
     query: str | None,
     reconcile_state: VenueEventState | None,
     status_bucket: VenueStatusBucket | None,
+    retryable_only: bool,
+    severity: str | None,
+    suggested_action: str | None,
     queue_service: ExecutionIntentQueueService,
 ) -> list[ExecutionVenueEvent]:
     filtered = events
@@ -161,6 +164,24 @@ def filter_venue_event_rows(
             event
             for event in filtered
             if queue_service.classify_venue_status(event.venue_status) == status_bucket
+        ]
+    if retryable_only:
+        filtered = [
+            event
+            for event in filtered
+            if queue_service.to_venue_event_read(event).retryable
+        ]
+    if severity is not None:
+        filtered = [
+            event
+            for event in filtered
+            if queue_service.to_venue_event_read(event).severity == severity
+        ]
+    if suggested_action is not None:
+        filtered = [
+            event
+            for event in filtered
+            if queue_service.to_venue_event_read(event).suggested_action == suggested_action
         ]
     if query is not None:
         needle = query.strip().lower()
@@ -222,6 +243,10 @@ def venue_events_csv_rows(
                 event_read.venue_order_id,
                 event_read.ret_code,
                 event_read.ret_msg,
+                event_read.incident_type,
+                event_read.severity,
+                event_read.retryable,
+                event_read.suggested_action,
             ]
         )
     return rows
@@ -1535,6 +1560,9 @@ async def list_execution_venue_events(
     query: str | None = Query(default=None, max_length=128),
     reconcile_state: VenueEventState | None = Query(default=None),
     status_bucket: VenueStatusBucket | None = Query(default=None),
+    retryable_only: bool = Query(default=False),
+    severity: str | None = Query(default=None, pattern="^(low|medium|high)$"),
+    suggested_action: str | None = Query(default=None, pattern="^(retry_later|reduce_size|refresh_order_state|fix_request|manual_review)$"),
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[ExecutionVenueEventRead]:
@@ -1554,6 +1582,9 @@ async def list_execution_venue_events(
         query=query,
         reconcile_state=reconcile_state,
         status_bucket=status_bucket,
+        retryable_only=retryable_only,
+        severity=severity,
+        suggested_action=suggested_action,
         queue_service=intent_queue_service,
     )
     page = filtered[offset : offset + limit]
@@ -1569,6 +1600,9 @@ async def export_execution_venue_events(
     query: str | None = Query(default=None, max_length=128),
     reconcile_state: VenueEventState | None = Query(default=None),
     status_bucket: VenueStatusBucket | None = Query(default=None),
+    retryable_only: bool = Query(default=False),
+    severity: str | None = Query(default=None, pattern="^(low|medium|high)$"),
+    suggested_action: str | None = Query(default=None, pattern="^(retry_later|reduce_size|refresh_order_state|fix_request|manual_review)$"),
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
@@ -1588,6 +1622,9 @@ async def export_execution_venue_events(
         query=query,
         reconcile_state=reconcile_state,
         status_bucket=status_bucket,
+        retryable_only=retryable_only,
+        severity=severity,
+        suggested_action=suggested_action,
         queue_service=intent_queue_service,
     )
     page = filtered[offset : offset + limit]
@@ -1606,6 +1643,10 @@ async def export_execution_venue_events(
             "venue_order_id",
             "ret_code",
             "ret_msg",
+            "incident_type",
+            "severity",
+            "retryable",
+            "suggested_action",
         ],
         venue_events_csv_rows(page, intent_queue_service),
     )

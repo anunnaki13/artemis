@@ -1,11 +1,14 @@
 from app.models.audit import AuditLog
 from app.models.market_data import (
+    AiAnalystRun,
+    BacktestRun,
     Candle,
     DailyDigestRun,
     ExecutionIntent,
     ExecutionVenueEvent,
     MarketSnapshot,
     OrderBookSnapshot,
+    RecoveryEvent,
     SpotAccountBalance,
     SpotExecutionFill,
     SpotExecutionFillLotClose,
@@ -18,6 +21,8 @@ from app.models.setting import AppSetting
 from app.models.user import User
 
 __all__ = [
+    "AiAnalystRun",
+    "BacktestRun",
     "AppSetting",
     "AuditLog",
     "Candle",
@@ -26,6 +31,7 @@ __all__ = [
     "ExecutionVenueEvent",
     "MarketSnapshot",
     "OrderBookSnapshot",
+    "RecoveryEvent",
     "SpotAccountBalance",
     "SpotExecutionFill",
     "SpotExecutionFillLotClose",

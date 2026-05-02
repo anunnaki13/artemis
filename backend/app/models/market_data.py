@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Index, Numeric, String, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -292,3 +292,69 @@ class DailyDigestRun(Base):
     json_path: Mapped[str] = mapped_column(String(512))
     strategy_csv_path: Mapped[str] = mapped_column(String(512))
     lineage_csv_path: Mapped[str] = mapped_column(String(512))
+
+
+class AiAnalystRun(Base):
+    __tablename__ = "ai_analyst_runs"
+    __table_args__ = (
+        Index("ix_ai_analyst_runs_created_at", "created_at"),
+        Index("ix_ai_analyst_runs_mode_created_at", "mode", "created_at"),
+        Index("ix_ai_analyst_runs_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    mode: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), default="completed")
+    question: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    response_text: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    budget_limit_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    budget_spent_before_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    review_notes: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    context_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+    __table_args__ = (
+        Index("ix_backtest_runs_created_at", "created_at"),
+        Index("ix_backtest_runs_symbol_created_at", "symbol", "created_at"),
+        Index("ix_backtest_runs_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed")
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    timeframe: Mapped[str] = mapped_column(String(8))
+    strategy_name: Mapped[str] = mapped_column(String(64))
+    sample_size: Mapped[int] = mapped_column(BigInteger)
+    summary_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    notes: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class RecoveryEvent(Base):
+    __tablename__ = "recovery_events"
+    __table_args__ = (
+        Index("ix_recovery_events_created_at", "created_at"),
+        Index("ix_recovery_events_status_created_at", "status", "created_at"),
+        Index("ix_recovery_events_severity_created_at", "severity", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="ok")
+    severity: Mapped[str] = mapped_column(String(16), default="low")
+    flags: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    summary_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    heartbeat_ping_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    dead_man_delivered: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    telegram_delivered: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

@@ -31,12 +31,14 @@ from services.execution.fill_analytics import (
 from services.execution.intent_queue import ExecutionIntentQueueService
 from services.market_data.bybit import BybitMarketDataClient
 from services.market_data.orderbook import metrics_from_payload
+from services.recovery.monitor import RecoveryMonitorService
 from services.reports.daily_digest import DailyDigestService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 intent_queue_service = ExecutionIntentQueueService()
 account_state_service = SpotAccountStateService()
 digest_service = DailyDigestService()
+recovery_monitor_service = RecoveryMonitorService()
 
 
 async def load_rest_liquidity_fallback(symbol: str = "BTCUSDT") -> dict[str, object] | None:
@@ -95,7 +97,9 @@ async def summary(
     _: User = Depends(get_current_user),
 ) -> dict[str, object]:
     from app.routers.execution import user_stream_service
-    from app.routers.market_data import stream_service
+    from app.routers.market_data import ensure_market_stream_running, stream_service
+
+    await ensure_market_stream_running()
 
     recent_intents = list(
         (
@@ -299,6 +303,7 @@ async def summary(
         for event in recent_venue_events
         if intent_queue_service.classify_venue_status(event.venue_status) in {"partial", "cancelled", "rejected"}
     ][:6]
+    latest_recovery = await recovery_monitor_service.latest_event(session)
 
     return {
         "equity": {"net": equity, "currency": "USDT"},
@@ -417,6 +422,21 @@ async def summary(
             }
             for event in filtered_venue_events
         ],
+        "recovery": (
+            {
+                "id": int(latest_recovery.id),
+                "created_at": latest_recovery.created_at,
+                "status": latest_recovery.status,
+                "severity": latest_recovery.severity,
+                "flags": list(latest_recovery.flags or []),
+                "summary_payload": dict(latest_recovery.summary_payload or {}),
+                "heartbeat_ping_ok": latest_recovery.heartbeat_ping_ok,
+                "dead_man_delivered": latest_recovery.dead_man_delivered,
+                "telegram_delivered": latest_recovery.telegram_delivered,
+            }
+            if latest_recovery is not None
+            else None
+        ),
         "digest_runs": [
             {
                 "report_date": item.report_date,

@@ -33,15 +33,20 @@ Hard rules from blueprint:
 - For demo testing, use matching demo/testnet credentials and set `BYBIT_TESTNET=true`.
 - Do not set `EXECUTION_LIVE_TRANSPORT_ENABLED=true` until the runtime panel shows the account is ready and you intend to test actual venue order placement.
 
+Current runtime note:
+
+- the app is already able to read Bybit runtime readiness and reflect it in the dashboard/operator surfaces
+- market-data stream is now maintained inside the app lifecycle, not only via request-time fallback
+
 ## AI / OpenRouter
 
 | Field | Required | Used For | Notes |
 |---|---:|---|---|
 | `OPENROUTER_API_KEY` | Phase 4 | AI Analyst | AI cannot execute orders or modify live config. |
-| `AI_PRIMARY_MODEL` | Phase 4 | Analyst reasoning | Blueprint default: `anthropic/claude-sonnet-4`. |
-| `AI_FAST_MODEL` | Phase 4 | Fast classification | Blueprint default: `openai/gpt-4o-mini`. |
-| `AI_HEAVY_MODEL` | Phase 4 | Heavy analysis | Blueprint default: `deepseek/deepseek-r1`. |
-| `AI_MAX_COST_USD_PER_DAY` | Phase 4 | Cost guardrail | Default `$5.00`. |
+| `AI_PRIMARY_MODEL` | Phase 4 | Analyst reasoning | Current recommended default: `openai/gpt-4.1-mini`. |
+| `AI_FAST_MODEL` | Phase 4 | Fast classification | Current recommended default: `google/gemini-2.5-flash-lite`. |
+| `AI_HEAVY_MODEL` | Phase 4 | Heavy analysis | Current recommended default: `google/gemini-2.5-flash`. |
+| `AI_MAX_COST_USD_PER_DAY` | Phase 4 | Cost guardrail | Current recommended default `$3.00`. |
 
 ## Notifications
 

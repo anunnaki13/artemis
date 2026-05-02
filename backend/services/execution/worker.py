@@ -17,17 +17,6 @@ from services.execution.intent_queue import ExecutionIntentQueueService
 
 
 class ExecutionWorkerService:
-    def _extract_error_diagnostics(self, response_body: object) -> tuple[int | None, str | None]:
-        if not isinstance(response_body, dict):
-            return None, None
-        ret_code = response_body.get("retCode")
-        ret_msg = response_body.get("retMsg")
-        try:
-            parsed_code = int(str(ret_code)) if ret_code is not None else None
-        except (TypeError, ValueError):
-            parsed_code = None
-        return parsed_code, str(ret_msg) if ret_msg is not None else None
-
     def __init__(
         self,
         queue_service: ExecutionIntentQueueService,
@@ -81,7 +70,14 @@ class ExecutionWorkerService:
             )
             result = await self.adapter.execute(intent, dispatch)
         except ExecutionTransportError as exc:
-            ret_code, ret_msg = self._extract_error_diagnostics(exc.response_body)
+            diagnostics_payload = exc.response_body if isinstance(exc.response_body, dict) else {"retMsg": str(exc)}
+            ret_code, ret_msg = self.queue_service.extract_venue_diagnostics(diagnostics_payload)
+            incident_type, severity, retryable, suggested_action = self.queue_service.classify_venue_incident(
+                venue_status="FAILED",
+                ret_code=ret_code,
+                ret_msg=ret_msg,
+                status_code=exc.status_code,
+            )
             return await self.queue_service.update_status(
                 session,
                 intent=intent,
@@ -95,9 +91,38 @@ class ExecutionWorkerService:
                     "response_body": exc.response_body,
                     "ret_code": ret_code,
                     "ret_msg": ret_msg,
+                    "incident_type": incident_type,
+                    "severity": severity,
+                    "retryable": retryable,
+                    "suggested_action": suggested_action,
                     "source": "dispatch_error",
                 },
                 execution_venue=exc.venue,
+            )
+        except Exception as exc:
+            incident_type, severity, retryable, suggested_action = self.queue_service.classify_venue_incident(
+                venue_status="FAILED",
+                ret_code=None,
+                ret_msg=str(exc),
+                status_code=None,
+            )
+            return await self.queue_service.update_status(
+                session,
+                intent=intent,
+                status="failed",
+                notes=intent.notes,
+                execution_payload={
+                    "status": "failed",
+                    "reason": str(exc),
+                    "venue": intent.execution_venue or "unknown",
+                    "ret_code": None,
+                    "ret_msg": str(exc),
+                    "incident_type": incident_type,
+                    "severity": severity,
+                    "retryable": retryable,
+                    "suggested_action": suggested_action,
+                    "source": "dispatch_unhandled_error",
+                },
             )
         execution_payload = {
             "status": result.status,
@@ -275,7 +300,14 @@ class ExecutionWorkerService:
         try:
             cancel = await self.adapter.cancel(pending)
         except ExecutionTransportError as exc:
-            ret_code, ret_msg = self._extract_error_diagnostics(exc.response_body)
+            diagnostics_payload = exc.response_body if isinstance(exc.response_body, dict) else {"retMsg": str(exc)}
+            ret_code, ret_msg = self.queue_service.extract_venue_diagnostics(diagnostics_payload)
+            incident_type, severity, retryable, suggested_action = self.queue_service.classify_venue_incident(
+                venue_status="CANCELLED",
+                ret_code=ret_code,
+                ret_msg=ret_msg,
+                status_code=exc.status_code,
+            )
             return await self.queue_service.update_execution_metadata(
                 session,
                 intent=pending,
@@ -288,6 +320,10 @@ class ExecutionWorkerService:
                     "response_body": exc.response_body,
                     "ret_code": ret_code,
                     "ret_msg": ret_msg,
+                    "incident_type": incident_type,
+                    "severity": severity,
+                    "retryable": retryable,
+                    "suggested_action": suggested_action,
                     "requested_at": datetime.now(tz=timezone.utc).isoformat(),
                     "source": "cancel_request_error",
                 },

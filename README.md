@@ -1,6 +1,6 @@
 # AIQ-BOT
 
-AIQ-BOT is an operator-centric quantitative trading system for Bybit-oriented spot execution, microstructure monitoring, risk-gated order flow, and post-trade analytics.
+AIQ-BOT is an operator-centric quantitative trading system for Bybit-oriented spot execution, microstructure monitoring, risk-gated order flow, recovery monitoring, AI-assisted review, and post-trade analytics.
 
 It is not a single "strategy script". It is a layered trading stack with:
 
@@ -13,7 +13,24 @@ It is not a single "strategy script". It is a layered trading stack with:
 - journal and execution-quality accounting
 - digest reporting and anomaly tracking
 
-The current repository state is beyond a scaffold. It already contains a functioning backend/frontend foundation for a trading platform with live market-state ingestion, execution lifecycle controls, operator reporting, and synchronized account-state read models.
+The current repository state is beyond a scaffold. It already contains a functioning backend/frontend foundation for a trading platform with live market-state ingestion, execution lifecycle controls, operator reporting, synchronized account-state read models, recovery monitoring, and first-pass research tooling.
+
+## Current Runtime State
+
+Date baseline: `2026-05-02`
+
+- Active venue runtime: `Bybit`
+- Public frontend: `http://103.150.197.225:3066`
+- Backend health: `http://127.0.0.1:8000/health`
+- Current overall completion estimate: `~94%`
+- Current mode: operator-ready and paper-workflow-ready, but not yet fully hardened for confident real-money operation
+
+Current handoff references:
+
+- [docs/HANDOFF_2026-05-02.md](/home/damnation/trade/docs/HANDOFF_2026-05-02.md:1)
+- [docs/IMPLEMENTATION_STATUS.md](/home/damnation/trade/docs/IMPLEMENTATION_STATUS.md:1)
+- [docs/PROGRESS.md](/home/damnation/trade/docs/PROGRESS.md:1)
+- [docs/DEVELOPMENT_ROADMAP.md](/home/damnation/trade/docs/DEVELOPMENT_ROADMAP.md:1)
 
 ## What This Bot Is
 
@@ -205,6 +222,26 @@ The system additionally scores daily anomalies using criteria such as:
 
 These digests are not just file exports; they feed the dashboard and operator review surfaces through persisted run logs and trend series.
 
+### 10. Recovery and AI review
+
+The system now includes an explicit recovery/ops layer and a reviewed AI analyst path.
+
+Recovery layer:
+
+- persisted `recovery_events`
+- periodic background checks
+- heartbeat / dead-man / Telegram hooks
+- operator status surfaces in dashboard and terminal
+
+AI layer:
+
+- OpenRouter-backed analyst brief generation
+- persisted `ai_analyst_runs`
+- daily cost budget guard
+- review queue with `pending / approved / rejected / follow_up`
+
+This matters because the platform is no longer just emitting signals and reports. It is beginning to model operational failure, alerting, and human review as first-class system states.
+
 ## Why Bybit, Not Binance
 
 The venue choice is operational. Binance has become harder to use reliably from Indonesia, so this repository is being migrated to a Bybit-primary architecture.
@@ -218,6 +255,40 @@ That is not a cosmetic rename. It changes:
 - operator safety checks around whitelist and withdrawal posture
 
 The migration plan driving that work is documented in [BINANCE-TO-BYBIT-MIGRATION.md](/home/damnation/trade/BINANCE-TO-BYBIT-MIGRATION.md:1).
+
+## What Is Already Functional
+
+The following surfaces are already backend-driven and operator-usable:
+
+- `Dashboard`
+- `Terminal`
+- `Strategies`
+- `Risk`
+- `Backtest`
+- `AI Analyst`
+- `Journal`
+- `Execution Quality`
+- `Logs`
+- `Settings`
+
+Important implemented backend capabilities:
+
+- Bybit market-data sync and stream maintenance
+- candle auto-refresh and orderbook fallback reads
+- strategy evaluation and risk preview
+- execution intent queue and lifecycle worker
+- Bybit venue diagnostics and incident normalization
+- synced balances, positions, fills, and FIFO lot-close audit
+- digest generation, anomaly scoring, and trend series
+- AI analyst run logging and review queue
+- recovery monitor and critical-state persistence
+
+Important remaining gaps:
+
+- final live-execution confidence hardening
+- deeper research stack beyond current walk-forward/read-model level
+- full design-system rollout page-by-page
+- final ops/recovery polish and replay tooling
 
 ## What Makes It Different
 

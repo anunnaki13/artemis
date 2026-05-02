@@ -2,6 +2,8 @@
 
 This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migration. Bybit is now the primary and only active runtime venue in the repository; older progress entries may still describe the original first-pass Binance implementation as historical context.
 
+Current completion estimate: `~94%`
+
 ## Implemented
 
 - Repository scaffold matching the v2 architecture.
@@ -51,7 +53,13 @@ This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migratio
 - Dashboard/operator read models for Bybit venue diagnostics, strategy cohorts, lineage alerts, digest artifacts, digest anomaly banner, and digest trend series.
 - Journal and Execution Quality pages backed by live fill-ledger, chain-summary, lineage-outcome, and strategy-attribution APIs.
 - Execution-cost analytics for adverse slippage cost, adverse slippage bps, and underfill notional across fill summaries, intent outcomes, lineage outcomes, and strategy cohorts.
+- AI Analyst OpenRouter integration with read-only live-context briefing, persisted `ai_analyst_runs`, and daily budget guardrails.
+- AI Analyst review queue with persisted operator review state and review notes.
 - Daily digest runner with retention, Telegram completion notice, anomaly scoring, persisted `daily_digest_runs`, range-filtered digest series, and series CSV export.
+- Recovery monitor with persisted `recovery_events`, operator status API, background checks, and alert side effects.
+- Backtest persisted runs, grouped overview read model, and walk-forward window analysis.
+- Market-stream maintainer task that keeps Bybit stream bootstrap inside the app lifecycle instead of relying only on request-triggered recovery.
+- First-pass Quantum design-system rollout in the global shell and key operator pages.
 - Capital Profile Manager with v2.1 MICRO/SMALL/STANDARD/SCALED rules and growth-plan config.
 - Telegram notification skeleton with protected test endpoint and encrypted settings lookup.
 - Symbol Universe Manager foundation with Bybit 24h ticker filtering and blacklist enforcement.
@@ -70,22 +78,24 @@ This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migratio
 - Observability: Prometheus endpoint and service exist, but domain metrics and Grafana dashboards are pending.
 - Notifications: Telegram test path exists; recurring heartbeat, severity routing, repeated critical alerts, and email fallback are pending.
 - Edge modules: Symbol Universe Manager exists as an on-demand endpoint; daily scheduler, persistence, UI, and regime state machine are pending.
-- Frontend: core operator pages are now backend-driven; broader filtering, comparison statistics, and deeper workflow controls are still pending.
+- Frontend: core operator pages are now backend-driven; Quantum design rollout is partially complete and still uneven page-to-page.
+- Recovery: active and useful, but broader replay/repair tooling is still pending.
+- Backtest: persisted, queryable, and walk-forward capable, but still not a full research engine.
 
 ## Not Implemented Yet
 
 - Candle aggregation and snapshot persistence exist for Bybit kline, ticker, depth-delta, funding-rate, and open-interest feeds; orderbook ladders are reconstructed in memory, liquidity metrics are exposed both live and from recent persisted snapshots, and dedicated orderbook snapshot history is now persisted, while full unthrottled ladder persistence is still pending.
 - Strategy registry, baseline strategies, and microstructure strategies.
-- Backtest engine, walk-forward validation, Monte Carlo, sensitivity, Deflated Sharpe.
+- Full research engine depth: saved presets, Monte Carlo, sensitivity, Deflated Sharpe, and broader experiment orchestration.
 - Execution engine, idempotent order placement, fill reconciliation, SL/TP manager.
 - Paper trading simulator and live-vs-backtest divergence tracker.
 - Full lot-level execution-quality and cost accounting pipeline.
-- AI Analyst OpenRouter integration and suggestion approval workflow.
-- Recovery service and dead-man switch.
+- AI Analyst is reviewed but still lacks deeper recommendation-to-operator workflow and action queue semantics.
+- Recovery/ops layer still lacks replay, drill, and deeper repair workflows.
 - Full production deployment hardening, backups, Nginx TLS, and disaster recovery drills.
 - Comprehensive research pipeline: backtest engine, walk-forward, Monte Carlo, sensitivity, and Deflated Sharpe.
 - Multi-strategy registry with robust configuration, enablement, and comparative analytics.
 
 ## Next Blueprint Gate
 
-Phase 1 now includes Bybit REST/WebSocket ingestion, futures-context polling, in-memory orderbook reconstruction, historical orderbook snapshot storage, strategy/risk/execution foundations, venue-native private-stream reconciliation, synced balances and positions, partial-fill dedupe, mark-to-market PnL, cancel/replace lifecycle, journal-grade fill ledger, strategy-attributed journal and execution-quality reads, venue diagnostics, first-pass execution-cost analytics, chain-level FIFO lot-close and hold-time review, dashboard/operator exports, scheduled digest reporting, digest anomaly scoring, persisted digest run logs, and digest trend analytics in the dashboard. The next blueprint gate is execution hardening and accounting depth: richer Bybit venue control, stronger lot-level close accounting, and then the research/validation pipeline.
+Phase 1 now includes Bybit REST/WebSocket ingestion, futures-context polling, in-memory orderbook reconstruction, historical orderbook snapshot storage, strategy/risk/execution foundations, venue-native private-stream reconciliation, synced balances and positions, partial-fill dedupe, mark-to-market PnL, cancel/replace lifecycle, journal-grade fill ledger, strategy-attributed journal and execution-quality reads, venue diagnostics, first-pass execution-cost analytics, chain-level FIFO lot-close and hold-time review, dashboard/operator exports, scheduled digest reporting, digest anomaly scoring, persisted digest run logs, recovery monitoring, AI review queue, backtest persisted runs, and walk-forward analytics. The next blueprint gate is final live-execution hardening plus research-stack maturity, followed by full design-system completion.

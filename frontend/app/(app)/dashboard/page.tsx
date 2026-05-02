@@ -110,6 +110,21 @@ function formatTimestamp(value: string | null | undefined) {
   });
 }
 
+function formatAgeMinutes(value: string | null | undefined) {
+  if (!value) {
+    return "--";
+  }
+  const ageMs = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) {
+    return "--";
+  }
+  const ageMinutes = ageMs / 60000;
+  if (ageMinutes < 1) {
+    return "<1m";
+  }
+  return `${ageMinutes.toFixed(1)}m`;
+}
+
 function buildPriceSparkPath(candles: CandleResponse[]) {
   if (candles.length === 0) {
     return "";
@@ -395,6 +410,8 @@ export default function DashboardPage() {
     latestClose !== null && previousClose !== null && previousClose !== 0
       ? ((latestClose - previousClose) / previousClose) * 100
       : null;
+  const candleFreshnessMinutes = latestCandle ? (Date.now() - new Date(latestCandle.open_time).getTime()) / 60000 : null;
+  const candleStreamStale = candleFreshnessMinutes !== null && candleFreshnessMinutes > 3;
   const executionCounts = summary?.execution_counts ?? {};
   const activeIntents = (executionCounts.approved ?? 0) + (executionCounts.dispatching ?? 0);
   const utcNow = new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
@@ -574,6 +591,28 @@ export default function DashboardPage() {
               <span>{summary?.bybit_runtime?.issues?.[0] ?? "no runtime issues"}</span>
             </div>
           </div>
+          <div className="mt-3 rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-[11px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-muted">RECOVERY</span>
+              <span
+                className={
+                  summary?.recovery?.status === "critical"
+                    ? "text-loss"
+                    : summary?.recovery?.status === "warn"
+                      ? "text-warning"
+                      : "text-profit"
+                }
+              >
+                {summary?.recovery?.status ?? "unknown"}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-muted">
+              <span>{summary?.recovery?.flags?.join(", ") || "no active flags"}</span>
+              <span>
+                ping {summary?.recovery?.heartbeat_ping_ok === null ? "--" : summary?.recovery?.heartbeat_ping_ok ? "ok" : "fail"}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -660,11 +699,22 @@ export default function DashboardPage() {
               <div className={`mt-1 ${candleDelta !== null && candleDelta < 0 ? "text-loss" : "text-profit"}`}>
                 {formatNumber(latestCandle?.close, 2)} / {candleDelta === null ? "--" : `${formatNumber(candleDelta, 2)}%`}
               </div>
+              <div className="mt-1 flex items-center gap-2 text-[10px]">
+                <span className={candleStreamStale ? "text-warning" : "text-secondary"}>
+                  candle age {formatAgeMinutes(latestCandle?.open_time)}
+                </span>
+                <span className={candleStreamStale ? "text-warning" : "text-profit"}>
+                  {candleStreamStale ? "STALE" : "FRESH"}
+                </span>
+              </div>
             </div>
             <div className="absolute right-3 top-3 rounded border border-white/10 bg-black/70 px-3 py-2 font-mono text-[11px]">
               <div className="text-muted">DEPTH SNAPSHOT</div>
               <div className="mt-1 text-cyan">
                 {formatNumber(orderbook?.metrics.mid_price, 2)} / {formatCompact(orderbook?.metrics.bid_depth_notional_0p5pct)} bid
+              </div>
+              <div className="mt-1 text-[10px] text-secondary">
+                stream {marketStream?.running ? "running" : "stopped"} / {priceStreamSymbol} / {priceStreamInterval}
               </div>
             </div>
           </div>

@@ -1,9 +1,43 @@
 # Progress Log
 
+Current overall completion estimate: `~94%`
+
 ## 2026-05-02
 
 ### Completed
 
+- Fixed the `daily-digest/runs` request-validation mismatch that caused frontend callers using `limit=365` to receive `422`.
+- Hardened market-stream lifecycle:
+  - added throttled `ensure_market_stream_running(...)`
+  - added startup maintainer task in the app process
+  - recovery monitor now ensures the stream before evaluating runtime health
+- Improved recovery signal quality after restart:
+  - latest direct recovery check no longer flags `market_stream_stopped`
+  - current expected warning is digest/anomaly-related when there are zero fills
+- Added AI Analyst review workflow:
+  - persisted review metadata on `ai_analyst_runs`
+  - queue endpoint
+  - review action endpoint
+  - frontend review controls for `pending / approved / rejected / follow_up`
+- Added recovery monitoring:
+  - `recovery_events` table
+  - background monitor loop
+  - `/api/recovery/status`
+  - `/api/recovery/events`
+  - `/api/recovery/checks/run`
+  - heartbeat/dead-man/Telegram hooks
+- Added backtest persistence and research-read models:
+  - `backtest_runs` table
+  - `/api/backtest/runs`
+  - `/api/backtest/overview`
+  - `/api/backtest/walk-forward`
+  - grouped strategy/timeframe summaries
+  - window-by-window walk-forward results
+- Continued page-level Quantum design rollout from `AIQ-DESIGN-SYSTEM-BLUEPRINT.md`:
+  - global shell/base tokens
+  - `terminal`
+  - `logs`
+  - `strategies`
 - Promoted Bybit to the active venue runtime across market data, execution preview, and private-stream account sync.
 - Added safer Bybit operator/runtime visibility:
   - dashboard now shows Bybit runtime readiness, mainnet/testnet mode, and transport safety state
@@ -53,6 +87,13 @@
 - Surfaced FIFO lot-close review in operator UI:
   - `Journal` now shows per-fill and per-chain lot-close breakdown
   - `Execution Quality` now shows lot hold cohorts for selected recent chains
+- Replaced placeholder `Strategies`, `Risk`, `Terminal`, `Backtest`, and `AI Analyst` pages with backend-driven read models.
+- Added read-only OpenRouter analyst flow:
+  - `/api/ai-analyst/brief`
+  - `/api/ai-analyst/runs`
+  - `/api/ai-analyst/budget`
+  - persisted `ai_analyst_runs`
+  - daily cost guard using `AI_MAX_COST_USD_PER_DAY`
 
 ### Current Delivered Sequence
 
@@ -65,15 +106,24 @@
 7. venue diagnostics and operator alerting
 8. dashboard exports, digests, anomaly tracking, and digest trend tooling
 9. Bybit-primary venue migration and runtime safety gating
+10. AI Analyst live integration and review queue
+11. recovery monitor and persisted ops events
+12. backtest persisted runs, overview, and walk-forward
+13. first-pass Quantum design-system rollout
 
 ### Next Development Sequence
 
-1. build dedicated Venue Events review page and deeper operator filters
-2. extend lot-level PnL and close accounting into broader execution-quality rollups
-3. expand strategy registry
-4. build research pipeline: backtest, walk-forward, Monte Carlo, sensitivity
-5. add recovery, dead-man switch, and alerting hardening
-6. integrate AI Analyst backend and approval workflow
+1. finish Quantum restyle for `dashboard`, `backtest`, `risk`, `journal`, and `execution-quality`
+2. harden live execution further:
+   - retry/idempotency discipline
+   - safer repair/replay workflows
+   - deeper venue reconciliation
+3. mature research stack:
+   - saved presets
+   - richer exports
+   - better walk-forward comparisons
+   - later Monte Carlo / sensitivity
+4. continue ops/recovery polish and operator drill tooling
 
 ## 2026-05-01
 

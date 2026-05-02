@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     reports_daily_digest_hour_utc: int = 0
     reports_daily_digest_retention_days: int = 30
     reports_daily_digest_telegram_enabled: bool = True
+    recovery_check_interval_seconds: int = 30
+    recovery_alert_cooldown_minutes: int = 30
     prometheus_enabled: bool = True
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None

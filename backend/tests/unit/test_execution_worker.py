@@ -253,6 +253,9 @@ async def test_execution_worker_persists_bybit_error_diagnostics() -> None:
     assert failed.execution_payload is not None
     assert failed.execution_payload["ret_code"] == 10001
     assert failed.execution_payload["ret_msg"] == "insufficient balance"
+    assert failed.execution_payload["incident_type"] == "insufficient_balance"
+    assert failed.execution_payload["suggested_action"] == "reduce_size"
+    assert failed.execution_payload["retryable"] is False
 
 
 async def test_execution_worker_cancels_dispatching_intent() -> None:

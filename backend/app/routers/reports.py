@@ -100,7 +100,7 @@ async def list_daily_digest_artifacts(
 
 @router.get("/daily-digest/runs", response_model=list[DailyDigestArtifactRead])
 async def list_daily_digest_runs(
-    limit: int = Query(default=30, ge=1, le=200),
+    limit: int = Query(default=30, ge=1, le=3650),
     days: int | None = Query(default=None, ge=1, le=3650),
     start_at: date | None = Query(default=None),
     end_at: date | None = Query(default=None),

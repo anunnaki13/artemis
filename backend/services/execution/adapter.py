@@ -229,7 +229,14 @@ class BybitAuthenticatedExecutionTransport(ExecutionTransport):
             timeout=15.0,
             transport=self.http_transport,
         ) as client:
-            response = await client.post("/v5/order/create", content=body, headers=headers)
+            try:
+                response = await client.post("/v5/order/create", content=body, headers=headers)
+            except httpx.RequestError as exc:
+                raise ExecutionTransportError(
+                    "bybit order submission transport error",
+                    venue="bybit",
+                    response_body={"retMsg": str(exc), "transport_error": exc.__class__.__name__},
+                ) from exc
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -290,7 +297,14 @@ class BybitAuthenticatedExecutionTransport(ExecutionTransport):
             timeout=15.0,
             transport=self.http_transport,
         ) as client:
-            response = await client.post("/v5/order/cancel", content=body, headers=headers)
+            try:
+                response = await client.post("/v5/order/cancel", content=body, headers=headers)
+            except httpx.RequestError as exc:
+                raise ExecutionTransportError(
+                    "bybit order cancellation transport error",
+                    venue="bybit",
+                    response_body={"retMsg": str(exc), "transport_error": exc.__class__.__name__},
+                ) from exc
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:

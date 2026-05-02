@@ -8,6 +8,8 @@ This document separates three views of the system:
 
 Date baseline: `2026-05-02`
 
+Current overall completion estimate: `~94%`
+
 ## 1. Delivered So Far
 
 ### Foundation and platform
@@ -132,6 +134,15 @@ Date baseline: `2026-05-02`
   - anomaly vs top-strategy pnl
 - Venue diagnostics for Bybit execution events with dashboard summary and CSV export.
 
+### Recovery, AI review, and research batch
+
+- AI Analyst OpenRouter integration with persisted run log.
+- AI Analyst review queue and operator review actions.
+- Recovery event persistence and background recovery monitor.
+- Persisted backtest runs and grouped overview analytics.
+- Walk-forward backtest windows and aggregate diagnostics.
+- First-pass Quantum design rollout across the global shell and selected operator pages.
+
 ## 2. Current Operational Surface
 
 The system is not just scaffolded anymore. It currently behaves like an early operator-grade trading platform foundation.
@@ -197,20 +208,23 @@ The next steps below are ordered by leverage, not by novelty.
 
 ### Near-term priority
 
-1. Venue review surface
-   - dedicated `Venue Events` page
-   - richer filters for status bucket, venue error code, and reconcile state
-   - linkage from venue diagnostics into journal/outcome review
+1. Finish the Quantum design rollout
+   - `dashboard`
+   - `backtest`
+   - `risk`
+   - `journal`
+   - `execution-quality`
 
-2. Lot-level accounting hardening
-   - close-lot accounting
-   - multi-order close attribution
-   - stronger realized pnl audit trail
+2. Final live-execution hardening
+   - retry/idempotency discipline
+   - safer repair/replay workflows
+   - deeper venue reconciliation
 
-3. Bybit live execution hardening
-   - richer venue error mapping
-   - deeper partial-fill and cancel reconciliation
-   - safer retry/idempotency behavior
+3. Research-stack maturity
+   - saved presets
+   - richer exports
+   - broader walk-forward compare surfaces
+   - later Monte Carlo and sensitivity
 
 ### Execution and trading-core hardening
 
@@ -221,9 +235,9 @@ The next steps below are ordered by leverage, not by novelty.
 
 ### Research and validation
 
-5. Backtest engine implementation
-6. walk-forward and Monte Carlo validation
-7. sensitivity analysis and Deflated Sharpe
+5. Broader research engine depth
+6. walk-forward, Monte Carlo, and sensitivity validation
+7. Deflated Sharpe and experiment ranking
 8. live-vs-research divergence reporting
 
 ### Ops and resilience
@@ -235,20 +249,19 @@ The next steps below are ordered by leverage, not by novelty.
 
 ### Product and AI layer
 
-13. AI Analyst backend integration
-14. approval workflow for AI suggestions
-17. operator review surfaces for AI-generated recommendations
+13. AI Analyst recommendation workflow depth
+14. operator action queue for reviewed AI outputs
+15. recommendation audit and outcome attribution
 
 ## 5. Recommended Build Order From Here
 
 If development continues without changing direction, the most efficient sequence is:
 
-1. finish the Bybit migration cleanup using [BINANCE-TO-BYBIT-MIGRATION.md](/home/damnation/trade/BINANCE-TO-BYBIT-MIGRATION.md:1) as the venue cutover checklist
-2. finish digest/operator analytics
-3. deepen accounting and pnl correctness
+1. finish page-by-page Quantum restyle
+2. finish final live-execution hardening
+3. deepen research stack
 4. expand strategy set
-5. build research pipeline
-6. add resilience/recovery
-7. integrate AI Analyst
+5. keep tightening recovery/ops workflows
+6. deepen AI recommendation workflow
 
 That keeps the platform usable while reducing the highest-risk gaps first.

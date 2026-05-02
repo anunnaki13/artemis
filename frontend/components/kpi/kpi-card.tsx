@@ -13,9 +13,9 @@ const toneClass = {
 
 export function KpiCard({ label, value, tone = "neutral" }: KpiCardProps) {
   return (
-    <section className="market-panel rounded p-3">
-      <div className="font-mono text-[10px] uppercase tracking-normal text-muted">{label}</div>
-      <div className={`mt-2 font-mono text-xl font-semibold ${toneClass[tone]}`}>{value}</div>
+    <section className="market-panel rounded px-3 py-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">{label}</div>
+      <div className={`numeric mt-2 text-xl font-semibold ${toneClass[tone]}`}>{value}</div>
     </section>
   );
 }

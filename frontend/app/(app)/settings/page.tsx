@@ -34,10 +34,10 @@ const sections = [
     description: "Analyst-only AI layer. It cannot execute orders or alter live risk settings.",
     fields: [
       ["OPENROUTER_API_KEY", "OpenRouter key", "password"],
-      ["AI_PRIMARY_MODEL", "anthropic/claude-sonnet-4", "text"],
-      ["AI_FAST_MODEL", "openai/gpt-4o-mini", "text"],
-      ["AI_HEAVY_MODEL", "deepseek/deepseek-r1", "text"],
-      ["AI_MAX_COST_USD_PER_DAY", "5.00", "number"]
+      ["AI_PRIMARY_MODEL", "openai/gpt-4.1-mini", "text"],
+      ["AI_FAST_MODEL", "google/gemini-2.5-flash-lite", "text"],
+      ["AI_HEAVY_MODEL", "google/gemini-2.5-flash", "text"],
+      ["AI_MAX_COST_USD_PER_DAY", "3.00", "number"]
     ]
   },
   {

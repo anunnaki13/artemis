@@ -186,6 +186,20 @@ def test_execution_intent_queue_extracts_ret_code_and_message() -> None:
     assert ret_msg == "insufficient balance"
 
 
+def test_execution_intent_queue_classifies_incident() -> None:
+    service = ExecutionIntentQueueService()
+    incident_type, severity, retryable, suggested_action = service.classify_venue_incident(
+        venue_status="REJECTED",
+        ret_code=10001,
+        ret_msg="insufficient balance",
+    )
+
+    assert incident_type == "insufficient_balance"
+    assert severity == "high"
+    assert retryable is False
+    assert suggested_action == "reduce_size"
+
+
 async def test_execution_intent_queue_marks_cancelled_timestamp() -> None:
     service = ExecutionIntentQueueService()
     user = User(

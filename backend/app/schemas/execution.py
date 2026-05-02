@@ -20,6 +20,8 @@ LifecycleStatus = Literal[
 ]
 VenueEventState = Literal["pending", "applied", "ignored", "unmatched"]
 VenueStatusBucket = Literal["accepted", "partial", "filled", "cancelled", "rejected", "pending", "unknown"]
+VenueIncidentSeverity = Literal["low", "medium", "high"]
+VenueIncidentAction = Literal["retry_later", "reduce_size", "refresh_order_state", "fix_request", "manual_review"]
 
 
 class ExecutionIntentSubmitRequest(BaseModel):
@@ -144,6 +146,10 @@ class ExecutionVenueEventRead(BaseModel):
     status_bucket: VenueStatusBucket
     ret_code: int | None
     ret_msg: str | None
+    incident_type: str | None
+    severity: VenueIncidentSeverity | None
+    retryable: bool
+    suggested_action: VenueIncidentAction | None
     payload: dict[str, object]
 
 

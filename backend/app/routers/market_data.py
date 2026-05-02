@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -30,6 +32,50 @@ from services.market_data.bybit_streaming import BybitMarketStreamService
 
 router = APIRouter(prefix="/market-data", tags=["market-data"])
 stream_service = BybitMarketStreamService(session_factory=AsyncSessionLocal)
+logger = logging.getLogger(__name__)
+_ensure_stream_lock = asyncio.Lock()
+_last_ensure_attempt_at: datetime | None = None
+_last_ensure_error: str | None = None
+
+
+async def ensure_market_stream_running(force: bool = False) -> bool:
+    global _last_ensure_attempt_at, _last_ensure_error
+    status = stream_service.status()
+    if status.running:
+        return True
+
+    now = datetime.now(UTC)
+    if not force and _last_ensure_attempt_at is not None and (now - _last_ensure_attempt_at).total_seconds() < 10:
+        return False
+
+    async with _ensure_stream_lock:
+        status = stream_service.status()
+        if status.running:
+            return True
+        now = datetime.now(UTC)
+        if not force and _last_ensure_attempt_at is not None and (now - _last_ensure_attempt_at).total_seconds() < 10:
+            return False
+        _last_ensure_attempt_at = now
+
+        from app.config import get_settings
+
+        settings = get_settings()
+        symbols = [
+            symbol.strip().upper()
+            for symbol in settings.market_stream_autostart_symbols.split(",")
+            if symbol.strip()
+        ]
+        if not symbols:
+            return False
+        try:
+            await stream_service.start(symbols, settings.market_stream_autostart_interval)
+            _last_ensure_error = None
+            logger.info("Ensured Bybit market stream running for %s @ %s", ",".join(symbols), settings.market_stream_autostart_interval)
+            return True
+        except Exception as exc:
+            _last_ensure_error = str(exc)
+            logger.warning("Failed to ensure Bybit market stream: %s", exc)
+            return False
 
 
 def build_orderbook_metrics_response(metrics: Any) -> OrderBookMetricsResponse:
@@ -175,6 +221,7 @@ async def list_candles(
 
 @router.get("/stream/status", response_model=MarketStreamStatusResponse)
 async def market_stream_status(_: User = Depends(get_current_user)) -> MarketStreamStatusResponse:
+    await ensure_market_stream_running()
     status_payload = stream_service.status()
     return MarketStreamStatusResponse(
         running=status_payload.running,

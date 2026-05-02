@@ -31,10 +31,12 @@ type EventDetailState = {
 
 type StatusBucket = "all" | "accepted" | "partial" | "filled" | "cancelled" | "rejected" | "pending" | "unknown";
 type ReconcileState = "all" | "pending" | "applied" | "ignored" | "unmatched";
+type SeverityFilter = "all" | "low" | "medium" | "high";
+type SuggestedActionFilter = "all" | "retry_later" | "reduce_size" | "refresh_order_state" | "fix_request" | "manual_review";
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="market-panel scanline rounded">
+    <section className="market-panel scanline rounded-xl">
       <div className="flex h-10 items-center border-b border-white/10 px-3">
         <h2 className="font-mono text-[11px] uppercase text-secondary">{title}</h2>
       </div>
@@ -122,6 +124,9 @@ export default function LogsPage() {
   });
   const [statusBucket, setStatusBucket] = useState<StatusBucket>("all");
   const [reconcileState, setReconcileState] = useState<ReconcileState>("all");
+  const [severity, setSeverity] = useState<SeverityFilter>("all");
+  const [suggestedAction, setSuggestedAction] = useState<SuggestedActionFilter>("all");
+  const [retryableOnly, setRetryableOnly] = useState(false);
   const [symbol, setSymbol] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
@@ -147,7 +152,10 @@ export default function LogsPage() {
           symbol: symbol || undefined,
           query: search || undefined,
           statusBucket: statusBucket === "all" ? undefined : statusBucket,
-          reconcileState: reconcileState === "all" ? undefined : reconcileState
+          reconcileState: reconcileState === "all" ? undefined : reconcileState,
+          severity: severity === "all" ? undefined : severity,
+          suggestedAction: suggestedAction === "all" ? undefined : suggestedAction,
+          retryableOnly
         });
         if (!active) {
           return;
@@ -175,7 +183,7 @@ export default function LogsPage() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [offset, reconcileState, search, statusBucket, symbol]);
+  }, [offset, reconcileState, search, statusBucket, symbol, severity, suggestedAction, retryableOnly]);
 
   const filteredEvents = state.events;
 
@@ -280,20 +288,29 @@ export default function LogsPage() {
     if (reconcileState !== "all") {
       params.set("reconcile_state", reconcileState);
     }
+    if (severity !== "all") {
+      params.set("severity", severity);
+    }
+    if (suggestedAction !== "all") {
+      params.set("suggested_action", suggestedAction);
+    }
+    if (retryableOnly) {
+      params.set("retryable_only", "true");
+    }
     params.set("offset", String(offset));
     return params;
-  }, [offset, reconcileState, search, statusBucket, symbol]);
+  }, [offset, reconcileState, search, statusBucket, symbol, severity, suggestedAction, retryableOnly]);
 
   const selectedEvent = filteredEvents.find((event) => event.id === selectedEventId) ?? null;
 
   return (
     <div className="space-y-3">
-      <div className="market-panel rounded px-4 py-3">
+      <div className="quantum-hero rounded-2xl px-4 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="font-mono text-[11px] uppercase text-muted">Logs / Bybit Venue Events</div>
-            <h1 className="mt-1 text-2xl font-semibold tracking-normal">Venue Event Review</h1>
-            <p className="mt-1 text-sm text-secondary">Review reject, cancel, partial-fill, and reconcile-state diagnostics from persisted Bybit execution events.</p>
+            <div className="quantum-badge">Venue Diagnostics</div>
+            <h1 className="mt-3 text-2xl font-semibold tracking-normal">Venue Event Review</h1>
+            <p className="quantum-subtitle mt-2">Review reject, cancel, partial-fill, and reconcile-state diagnostics from persisted Bybit execution events.</p>
           </div>
           <div className="font-mono text-[11px] uppercase text-muted">
             {state.updatedAt ? formatTimestamp(state.updatedAt) : "--"}
@@ -372,6 +389,53 @@ export default function LogsPage() {
             />
           </label>
         </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <label className="space-y-2">
+            <div className="font-mono text-[11px] uppercase text-muted">Severity</div>
+            <select
+              value={severity}
+              onChange={(event) => {
+                setSeverity(event.target.value as SeverityFilter);
+                setOffset(0);
+              }}
+              className="w-full rounded border border-white/10 bg-black/25 px-3 py-2 text-sm text-primary outline-none"
+            >
+              <option value="all">All severity</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <div className="font-mono text-[11px] uppercase text-muted">Suggested Action</div>
+            <select
+              value={suggestedAction}
+              onChange={(event) => {
+                setSuggestedAction(event.target.value as SuggestedActionFilter);
+                setOffset(0);
+              }}
+              className="w-full rounded border border-white/10 bg-black/25 px-3 py-2 text-sm text-primary outline-none"
+            >
+              <option value="all">All actions</option>
+              <option value="retry_later">retry_later</option>
+              <option value="reduce_size">reduce_size</option>
+              <option value="refresh_order_state">refresh_order_state</option>
+              <option value="fix_request">fix_request</option>
+              <option value="manual_review">manual_review</option>
+            </select>
+          </label>
+          <label className="flex items-end gap-2 rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-[11px] text-secondary">
+            <input
+              type="checkbox"
+              checked={retryableOnly}
+              onChange={(event) => {
+                setRetryableOnly(event.target.checked);
+                setOffset(0);
+              }}
+            />
+            Retryable only
+          </label>
+        </div>
         <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px]">
           <button
             type="button"
@@ -408,6 +472,18 @@ export default function LogsPage() {
           </div>
           <div className="mt-2 font-mono text-[11px] text-muted">events without intent linkage</div>
         </Panel>
+        <Panel title="High Severity">
+          <div className="text-2xl font-semibold text-loss">
+            {filteredEvents.filter((event) => event.severity === "high").length}
+          </div>
+          <div className="mt-2 font-mono text-[11px] text-muted">needs immediate operator action</div>
+        </Panel>
+        <Panel title="Retryable">
+          <div className="text-2xl font-semibold text-cyan">
+            {filteredEvents.filter((event) => event.retryable).length}
+          </div>
+          <div className="mt-2 font-mono text-[11px] text-muted">can likely be retried safely</div>
+        </Panel>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
@@ -419,6 +495,7 @@ export default function LogsPage() {
                 <th className="pb-2">Event</th>
                 <th className="pb-2">Bucket</th>
                 <th className="pb-2">State</th>
+                <th className="pb-2">Action</th>
                 <th className="pb-2">Order IDs</th>
                 <th className="pb-2">Diagnostics</th>
                 <th className="pb-2">Time</th>
@@ -441,6 +518,12 @@ export default function LogsPage() {
                     {event.status_bucket}
                   </td>
                   <td className="py-2 font-mono text-[11px] text-secondary">{event.reconcile_state}</td>
+                  <td className="py-2 font-mono text-[11px] text-secondary">
+                    <div>{event.suggested_action ?? "--"}</div>
+                    <div className={event.severity === "high" ? "text-loss" : event.severity === "medium" ? "text-warning" : "text-muted"}>
+                      {event.severity ?? "--"} {event.retryable ? "/ retry" : ""}
+                    </div>
+                  </td>
                   <td className="py-2 font-mono text-[11px] text-muted">
                     <div>{event.client_order_id ?? "--"}</div>
                     <div>{event.venue_order_id ?? "--"}</div>
@@ -461,7 +544,7 @@ export default function LogsPage() {
               ))}
               {filteredEvents.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-4 text-center text-muted">
+                  <td colSpan={7} className="py-4 text-center text-muted">
                     No venue events matched the current filters.
                   </td>
                 </tr>
@@ -501,6 +584,9 @@ export default function LogsPage() {
               </div>
               <div className={`mt-1 font-mono text-[11px] uppercase ${toneClass(selectedEvent.status_bucket)}`}>
                 {selectedEvent.status_bucket} / {selectedEvent.reconcile_state}
+              </div>
+              <div className="mt-1 font-mono text-[11px] text-secondary">
+                {selectedEvent.incident_type ?? "--"} / {selectedEvent.suggested_action ?? "--"} / {selectedEvent.severity ?? "--"} {selectedEvent.retryable ? "/ retryable" : ""}
               </div>
             </div>
 
