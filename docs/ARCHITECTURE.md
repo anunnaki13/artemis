@@ -10,5 +10,4 @@ The system follows the v2 blueprint structure:
 - `backend/execution_quality`: slippage, fill, and cost accounting.
 - `ops`: Docker, deployment, monitoring, and scripts.
 
-Order execution must eventually flow through strategy signal, risk veto, position sizing, execution pre-flight, exchange submission, and fill reconciliation. No frontend code may call Binance directly.
-
+Order execution must eventually flow through strategy signal, risk veto, position sizing, execution pre-flight, exchange submission, and fill reconciliation. No frontend code may call venue APIs directly.

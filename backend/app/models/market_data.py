@@ -47,7 +47,7 @@ class Candle(Base):
     volume: Mapped[Decimal] = mapped_column(Numeric(36, 12))
     quote_volume: Mapped[Decimal | None] = mapped_column(Numeric(36, 12), nullable=True)
     trade_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    source: Mapped[str] = mapped_column(String(32), default="binance")
+    source: Mapped[str] = mapped_column(String(32), default="bybit")
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

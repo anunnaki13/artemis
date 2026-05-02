@@ -46,11 +46,23 @@ export type DashboardSummaryResponse = {
     gross_notional_usd: string;
     gross_realized_pnl_usd: string;
     win_rate: string;
+    gross_adverse_slippage_cost_usd: string;
+    average_adverse_slippage_bps: string;
+    gross_underfill_notional_usd: string;
   }>;
   lineage_summary: {
     replacement_lineages_count: number;
     replacement_alerts_count: number;
     worst_slippage_bps: string | null;
+  };
+  venue_event_summary: {
+    accepted: number;
+    partial: number;
+    filled: number;
+    cancelled: number;
+    rejected: number;
+    pending: number;
+    unknown: number;
   };
   lineage_alerts: Array<{
     root_intent_id: number;
@@ -63,6 +75,20 @@ export type DashboardSummaryResponse = {
     slippage_bps: string | null;
     realized_pnl_usd: string;
     last_fill_at: string | null;
+  }>;
+  venue_event_alerts: Array<{
+    id: number;
+    created_at: string;
+    venue: string;
+    event_type: string;
+    venue_status: string;
+    status_bucket: "accepted" | "partial" | "filled" | "cancelled" | "rejected" | "pending" | "unknown";
+    symbol: string | null;
+    client_order_id: string | null;
+    venue_order_id: string | null;
+    reconcile_state: string;
+    ret_code: number | null;
+    ret_msg: string | null;
   }>;
   digest_runs: Array<{
     report_date: string;
@@ -248,12 +274,14 @@ export type SpotExecutionFillSummaryResponse = {
   traded_symbols_count: number;
   gross_notional_usd: string;
   gross_realized_pnl_usd: string;
+  gross_adverse_slippage_cost_usd: string;
   winning_fills_count: number;
   losing_fills_count: number;
   flat_fills_count: number;
   win_rate: string;
   average_fill_notional_usd: string;
   average_realized_pnl_per_fill_usd: string;
+  average_adverse_slippage_bps: string;
   strategy_breakdown: Array<{
     source_strategy: string;
     fills_count: number;
@@ -261,6 +289,9 @@ export type SpotExecutionFillSummaryResponse = {
     gross_notional_usd: string;
     gross_realized_pnl_usd: string;
     win_rate: string;
+    gross_adverse_slippage_cost_usd: string;
+    average_adverse_slippage_bps: string;
+    gross_underfill_notional_usd: string;
   }>;
   recent_chains: SpotExecutionFillChainResponse[];
 };
@@ -284,6 +315,9 @@ export type ExecutionIntentLineageOutcomeResponse = {
   realized_pnl_usd: string;
   fill_ratio: string;
   slippage_bps: string | null;
+  adverse_slippage_bps: string | null;
+  slippage_cost_usd: string;
+  underfill_notional_usd: string;
   last_fill_at: string | null;
 };
 
@@ -309,6 +343,34 @@ export type DailyDigestSeriesPointResponse = {
   lineage_alerts_count: number;
   anomaly_score: number;
   top_strategy_realized_pnl_usd: string | null;
+  anomaly_flags: string[];
+};
+
+export type DailyDigestPreviewResponse = {
+  report_date: string;
+  generated_at: string;
+  fills_count: number;
+  intents_count: number;
+  strategy_breakdown: Array<{
+    source_strategy: string;
+    fills_count: number;
+    chains_count: number;
+    gross_notional_usd: string;
+    gross_realized_pnl_usd: string;
+    win_rate: string;
+  }>;
+  lineage_alerts: Array<{
+    root_intent_id: number;
+    latest_intent_id: number;
+    symbol: string;
+    source_strategy: string;
+    lineage_size: number;
+    lineage_statuses: string[];
+    fill_ratio: string;
+    slippage_bps: string | null;
+    realized_pnl_usd: string;
+    last_fill_at: string | null;
+  }>;
 };
 
 async function parseApiError(response: Response) {
@@ -360,6 +422,7 @@ export async function listDailyDigestSeriesFiltered(options?: {
   days?: number;
   startAt?: string;
   endAt?: string;
+  flaggedOnly?: boolean;
 }): Promise<DailyDigestSeriesPointResponse[]> {
   const params = new URLSearchParams();
   params.set("limit", String(options?.limit ?? 365));
@@ -372,7 +435,34 @@ export async function listDailyDigestSeriesFiltered(options?: {
   if (options?.endAt) {
     params.set("end_at", options.endAt);
   }
+  if (options?.flaggedOnly) {
+    params.set("flagged_only", "true");
+  }
   return apiFetch<DailyDigestSeriesPointResponse[]>(`/reports/daily-digest/series?${params.toString()}`);
+}
+
+export async function listDailyDigestRunsFiltered(options?: {
+  limit?: number;
+  days?: number;
+  startAt?: string;
+  endAt?: string;
+  flaggedOnly?: boolean;
+}): Promise<DailyDigestArtifactResponse[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options?.limit ?? 365));
+  if (options?.days) {
+    params.set("days", String(options.days));
+  }
+  if (options?.startAt) {
+    params.set("start_at", options.startAt);
+  }
+  if (options?.endAt) {
+    params.set("end_at", options.endAt);
+  }
+  if (options?.flaggedOnly) {
+    params.set("flagged_only", "true");
+  }
+  return apiFetch<DailyDigestArtifactResponse[]>(`/reports/daily-digest/runs?${params.toString()}`);
 }
 
 export async function runDailyDigest(reportDate?: string): Promise<DailyDigestArtifactResponse> {
@@ -385,12 +475,16 @@ export async function runDailyDigest(reportDate?: string): Promise<DailyDigestAr
   });
 }
 
+export async function getDailyDigestPreview(reportDate: string): Promise<DailyDigestPreviewResponse> {
+  return apiFetch<DailyDigestPreviewResponse>(`/reports/daily-digest/preview?report_date=${reportDate}`);
+}
+
 export async function getMarketStreamStatus(): Promise<MarketStreamStatusResponse> {
   return apiFetch<MarketStreamStatusResponse>("/market-data/stream/status");
 }
 
-export async function getBinanceUserStreamStatus(): Promise<UserStreamStatusResponse> {
-  return apiFetch<UserStreamStatusResponse>("/execution/venues/binance/user-stream/status");
+export async function getBybitUserStreamStatus(): Promise<UserStreamStatusResponse> {
+  return apiFetch<UserStreamStatusResponse>("/execution/venues/bybit/user-stream/status");
 }
 
 export async function getExecutionIntents(limit = 8): Promise<ExecutionIntentResponse[]> {

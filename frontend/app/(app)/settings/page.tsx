@@ -13,15 +13,18 @@ const sections = [
     ]
   },
   {
-    title: "Binance",
+    title: "Bybit",
     icon: KeyRound,
-    description: "Trade-only API credentials. Withdrawal must be disabled and IP restriction enabled.",
+    description: "Trade-only API credentials. Withdrawal must be disabled, IP restriction enabled, and Unified Trading Account used.",
     fields: [
-      ["BINANCE_API_KEY", "Binance API key", "password"],
-      ["BINANCE_API_SECRET", "Binance API secret", "password"],
-      ["BINANCE_TESTNET", "true or false", "text"],
-      ["BINANCE_VIP_TIER", "0", "number"],
-      ["BINANCE_WHITELISTED_IP", "103.150.197.225", "text"]
+      ["BYBIT_API_KEY", "Bybit API key", "password"],
+      ["BYBIT_API_SECRET", "Bybit API secret", "password"],
+      ["BYBIT_TESTNET", "true or false", "text"],
+      ["BYBIT_API_BASE_URL", "https://api.bybit.com", "text"],
+      ["BYBIT_ACCOUNT_TYPE", "UNIFIED", "text"],
+      ["BYBIT_WITHDRAWAL_ENABLED", "false", "text"],
+      ["BYBIT_VIP_TIER", "0", "number"],
+      ["BYBIT_WHITELISTED_IP", "103.150.197.225", "text"]
     ]
   },
   {
@@ -99,7 +102,7 @@ export default function SettingsPage() {
         <div className="grid gap-3 lg:grid-cols-3">
           <div className="rounded border border-loss/30 bg-loss/10 p-3">
             <AlertTriangle className="mb-3 text-loss" size={18} />
-            <div className="font-mono text-xs text-loss">Never enable Binance withdrawal permission.</div>
+            <div className="font-mono text-xs text-loss">Never enable Bybit withdrawal permission.</div>
           </div>
           <div className="rounded border border-warning/30 bg-warning/10 p-3">
             <LockKeyhole className="mb-3 text-warning" size={18} />

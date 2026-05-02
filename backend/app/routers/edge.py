@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from app.config import get_settings
 from app.schemas.edge import UniverseCandidateRead, UniverseRefreshResponse
 from services.edge.universe_manager import SymbolUniverseManager
-from services.market_data.binance import BinanceMarketDataClient
+from services.market_data.bybit import BybitMarketDataClient
 
 router = APIRouter(prefix="/edge", tags=["edge"])
 
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/edge", tags=["edge"])
 @router.post("/universe/refresh", response_model=UniverseRefreshResponse)
 async def refresh_universe() -> UniverseRefreshResponse:
     settings = get_settings()
-    tickers = await BinanceMarketDataClient().ticker_24h()
+    tickers = await BybitMarketDataClient().ticker_24h(category="spot")
     selection = SymbolUniverseManager(
         settings.universe_config_path,
         settings.universe_blacklist_path,

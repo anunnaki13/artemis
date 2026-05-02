@@ -19,6 +19,7 @@ LifecycleStatus = Literal[
     "failed",
 ]
 VenueEventState = Literal["pending", "applied", "ignored", "unmatched"]
+VenueStatusBucket = Literal["accepted", "partial", "filled", "cancelled", "rejected", "pending", "unknown"]
 
 
 class ExecutionIntentSubmitRequest(BaseModel):
@@ -140,6 +141,9 @@ class ExecutionVenueEventRead(BaseModel):
     client_order_id: str | None
     venue_order_id: str | None
     reconcile_state: VenueEventState
+    status_bucket: VenueStatusBucket
+    ret_code: int | None
+    ret_msg: str | None
     payload: dict[str, object]
 
 
@@ -149,7 +153,7 @@ class ExecutionVenueEventIngestResponse(BaseModel):
     intent: ExecutionIntentRead | None
 
 
-class BinanceUserStreamStatusResponse(BaseModel):
+class VenueUserStreamStatusResponse(BaseModel):
     running: bool
     subscribed: bool
     reconnect_attempts: int
@@ -237,6 +241,8 @@ class SpotExecutionFillSummaryRead(BaseModel):
     win_rate: Decimal
     average_fill_notional_usd: Decimal
     average_realized_pnl_per_fill_usd: Decimal
+    gross_adverse_slippage_cost_usd: Decimal
+    average_adverse_slippage_bps: Decimal
     strategy_breakdown: list[dict[str, object]]
     recent_chains: list[SpotExecutionFillChainRead]
 
@@ -260,6 +266,9 @@ class ExecutionIntentOutcomeRead(BaseModel):
     realized_pnl_usd: Decimal
     fill_ratio: Decimal
     slippage_bps: Decimal | None
+    adverse_slippage_bps: Decimal | None
+    slippage_cost_usd: Decimal
+    underfill_notional_usd: Decimal
     last_fill_at: datetime | None
 
 
@@ -282,10 +291,13 @@ class ExecutionIntentLineageOutcomeRead(BaseModel):
     realized_pnl_usd: Decimal
     fill_ratio: Decimal
     slippage_bps: Decimal | None
+    adverse_slippage_bps: Decimal | None
+    slippage_cost_usd: Decimal
+    underfill_notional_usd: Decimal
     last_fill_at: datetime | None
 
 
-class BinanceExecutionPreviewResponse(BaseModel):
+class VenueExecutionPreviewResponse(BaseModel):
     symbol: str
     side: str
     base_url: str
@@ -295,3 +307,11 @@ class BinanceExecutionPreviewResponse(BaseModel):
     client_order_id: str
     unsigned_payload: dict[str, str | int]
     signed_payload_keys: list[str]
+
+
+class BybitUserStreamStatusResponse(VenueUserStreamStatusResponse):
+    pass
+
+
+class BybitExecutionPreviewResponse(VenueExecutionPreviewResponse):
+    pass

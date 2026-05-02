@@ -180,6 +180,43 @@ class SpotAccountStateService:
             updated.append(current)
         return updated
 
+    async def apply_wallet_balances(
+        self,
+        session: AsyncSession,
+        balances: list[dict[str, Any]],
+        *,
+        free_key: str = "availableToWithdraw",
+        locked_key: str = "locked",
+        total_key: str = "walletBalance",
+        asset_key: str = "coin",
+        source_event: str = "wallet",
+    ) -> list[SpotAccountBalance]:
+        updated: list[SpotAccountBalance] = []
+        for balance in balances:
+            asset = str(balance.get(asset_key, "")).upper()
+            if not asset:
+                continue
+            free = parse_decimal(balance.get(free_key))
+            locked = parse_decimal(balance.get(locked_key))
+            total = parse_decimal(balance.get(total_key))
+            if total == Decimal("0"):
+                total = free + locked
+            total_value_usd = await estimate_asset_value_usd(session, asset, total)
+            current = await session.get(SpotAccountBalance, asset)
+            if current is None:
+                current = SpotAccountBalance(asset=asset)
+                session.add(current)
+            current.free = free
+            current.locked = locked
+            current.total = total
+            current.total_value_usd = total_value_usd
+            current.last_delta = None
+            current.updated_at = datetime.now(tz=timezone.utc)
+            current.source_event = source_event
+            await session.flush()
+            updated.append(current)
+        return updated
+
     async def apply_balance_delta(
         self,
         session: AsyncSession,
@@ -290,6 +327,35 @@ class SpotAccountStateService:
         session.add(execution_fill)
         await session.flush()
         return position
+
+    async def apply_execution_trade_delta(
+        self,
+        session: AsyncSession,
+        *,
+        symbol: str,
+        side: str,
+        execution_intent_id: int | None = None,
+        source_strategy: str | None = None,
+        client_order_id: str | None,
+        venue_order_id: str | None,
+        trade_id: int | None = None,
+        quantity: Decimal,
+        quote_quantity: Decimal,
+    ) -> SpotSymbolPosition | None:
+        if quantity <= Decimal("0") or quote_quantity <= Decimal("0"):
+            return None
+        return await self.apply_fill_delta(
+            session,
+            symbol=symbol,
+            side=side,
+            execution_intent_id=execution_intent_id,
+            source_strategy=source_strategy,
+            client_order_id=client_order_id,
+            venue_order_id=venue_order_id,
+            trade_id=trade_id,
+            last_quantity=quantity,
+            last_quote_quantity=quote_quantity,
+        )
 
     async def apply_execution_fill(
         self,

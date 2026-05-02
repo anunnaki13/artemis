@@ -1,6 +1,6 @@
 # AIQ-BOT
 
-AIQ-BOT is an operator-centric quantitative trading system for Binance-oriented spot execution, microstructure monitoring, risk-gated order flow, and post-trade analytics.
+AIQ-BOT is an operator-centric quantitative trading system for Bybit-oriented spot execution, microstructure monitoring, risk-gated order flow, and post-trade analytics.
 
 It is not a single "strategy script". It is a layered trading stack with:
 
@@ -56,7 +56,7 @@ AIQ-BOT addresses that by turning the bot into a **stateful research-and-operati
 
 ### 1. Market-state ingestion
 
-The system ingests Binance data through both REST and WebSocket paths.
+The system ingests Bybit data through both REST and WebSocket paths.
 
 - REST:
   - symbol metadata
@@ -64,9 +64,8 @@ The system ingests Binance data through both REST and WebSocket paths.
   - orderbook bootstrap snapshots
 - WebSocket:
   - kline
-  - mini-ticker
-  - book-ticker
-  - depth delta
+  - ticker
+  - orderbook delta
 - futures context polling:
   - funding rate
   - open interest
@@ -149,11 +148,15 @@ The worker layer moves intents through an execution lifecycle. The system alread
 - cancel requests
 - replace lineage for pre-dispatch orders
 
-There is also a venue-facing contract for Binance execution transport, with runtime gating so that authenticated live placement is only used when explicitly enabled.
+There is also a venue-facing contract for Bybit execution transport, with runtime gating so that authenticated live placement is only used when explicitly enabled. Live and private-stream access are blocked unless the runtime passes three safety checks:
+
+- `BYBIT_ACCOUNT_TYPE=UNIFIED`
+- `BYBIT_WHITELISTED_IP` is configured
+- `BYBIT_WITHDRAWAL_ENABLED=false`
 
 ### 7. Venue-state synchronization
 
-The Binance user stream is consumed to synchronize account truth into backend state.
+The Bybit private user stream is consumed to synchronize account truth into backend state.
 
 Persisted read models include:
 
@@ -201,6 +204,20 @@ The system additionally scores daily anomalies using criteria such as:
 - high lineage-alert pressure
 
 These digests are not just file exports; they feed the dashboard and operator review surfaces through persisted run logs and trend series.
+
+## Why Bybit, Not Binance
+
+The venue choice is operational. Binance has become harder to use reliably from Indonesia, so this repository is being migrated to a Bybit-primary architecture.
+
+That is not a cosmetic rename. It changes:
+
+- authenticated transport assumptions
+- private stream semantics
+- order identifier conventions
+- account model assumptions such as `UNIFIED`
+- operator safety checks around whitelist and withdrawal posture
+
+The migration plan driving that work is documented in [BINANCE-TO-BYBIT-MIGRATION.md](/home/damnation/trade/BINANCE-TO-BYBIT-MIGRATION.md:1).
 
 ## What Makes It Different
 
@@ -281,15 +298,18 @@ That is essential for any scientifically credible iterative improvement loop.
 The implemented system currently includes:
 
 - auth and settings vault
-- Binance market-data ingestion
+- Bybit-only market-data ingestion
 - orderbook reconstruction and liquidity metrics
 - historical market snapshot persistence
 - first strategy path
 - risk gate
 - execution intent lifecycle
+- Bybit runtime safety gating for live/private access
 - venue user-stream synchronization
 - synced balances and positions
 - fill ledger and execution-quality summaries
+- venue diagnostics for reject/cancel/partial event review
+- execution-cost accounting for adverse slippage and underfill pressure
 - dashboard/operator analytics
 - daily digest generation, persistence, and anomaly tracking
 

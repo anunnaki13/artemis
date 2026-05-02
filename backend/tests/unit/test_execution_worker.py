@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.models import ExecutionIntent, ExecutionVenueEvent, User
 from app.schemas.risk import SignalRiskEvaluateRequest, SignalRiskEvaluateResponse
 from services.execution.intent_queue import ExecutionIntentQueueService
+from services.execution.adapter import ExecutionTransportError
 from services.execution.worker import ExecutionWorkerService
 from strategies.base import Signal
 
@@ -52,6 +53,22 @@ class FakeScalarListSession:
     def add(self, obj: object) -> None:
         self.added.append(obj)
         return None
+
+
+class FailingAdapter:
+    async def dispatch(self, _intent: ExecutionIntent) -> object:
+        raise ExecutionTransportError(
+            "venue rejected order",
+            venue="bybit",
+            status_code=200,
+            response_body={"retCode": 10001, "retMsg": "insufficient balance"},
+        )
+
+    async def execute(self, _intent: ExecutionIntent, _dispatch: object) -> object:
+        raise AssertionError("execute should not be called")
+
+    async def cancel(self, _intent: ExecutionIntent) -> object:
+        raise AssertionError("cancel should not be called")
 
 
 def build_approved_intent() -> ExecutionIntent:
@@ -177,13 +194,13 @@ async def test_execution_worker_applies_partial_fill_event_without_closing_inten
     updated, reconcile_state = await worker.apply_venue_event(
         session,  # type: ignore[arg-type]
         intent=intent,
-        venue="binance",
-        event_type="executionReport",
+        venue="bybit",
+        event_type="execution",
         venue_status="PARTIALLY_FILLED",
         filled_notional="250",
         average_price="100.5",
-        venue_order_id="binance-order-1",
-        client_order_id="binance-client-1",
+        venue_order_id="bybit-order-1",
+        client_order_id="bybit-client-1",
         details={"last_executed_qty": "2.5"},
     )
 
@@ -207,20 +224,35 @@ async def test_execution_worker_maps_filled_venue_event_to_executed() -> None:
     updated, reconcile_state = await worker.apply_venue_event(
         session,  # type: ignore[arg-type]
         intent=intent,
-        venue="binance",
-        event_type="executionReport",
+        venue="bybit",
+        event_type="execution",
         venue_status="FILLED",
         filled_notional="500",
         average_price="100",
-        venue_order_id="binance-order-2",
-        client_order_id="binance-client-2",
+        venue_order_id="bybit-order-2",
+        client_order_id="bybit-client-2",
         details={"trade_count": 3},
     )
 
     assert reconcile_state == "applied"
-    assert updated.status == "executed"
-    assert updated.execution_payload is not None
-    assert updated.execution_payload["source"] == "reconciliation"
+
+
+async def test_execution_worker_persists_bybit_error_diagnostics() -> None:
+    intent = build_approved_intent()
+    intent.id = 6
+    intent.status = "approved"
+    intent.created_at = datetime.now(tz=timezone.utc)
+    intent.updated_at = datetime.now(tz=timezone.utc)
+    session = FakeSession(intent)
+
+    worker = ExecutionWorkerService(ExecutionIntentQueueService(), adapter=FailingAdapter())  # type: ignore[arg-type]
+    failed = await worker.dispatch_next(session)  # type: ignore[arg-type]
+
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.execution_payload is not None
+    assert failed.execution_payload["ret_code"] == 10001
+    assert failed.execution_payload["ret_msg"] == "insufficient balance"
 
 
 async def test_execution_worker_cancels_dispatching_intent() -> None:

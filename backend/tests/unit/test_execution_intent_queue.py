@@ -149,8 +149,8 @@ async def test_execution_intent_queue_records_venue_event() -> None:
     event = await service.record_venue_event(
         session,  # type: ignore[arg-type]
         execution_intent_id=42,
-        venue="binance",
-        event_type="executionReport",
+        venue="bybit",
+        event_type="execution",
         venue_status="PARTIALLY_FILLED",
         symbol="BTCUSDT",
         client_order_id="client-42",
@@ -163,7 +163,27 @@ async def test_execution_intent_queue_records_venue_event() -> None:
     assert event.execution_intent_id == 42
     assert event.reconcile_state == "applied"
     assert event.reconciled_at is not None
-    assert service.to_venue_event_read(event).venue_status == "PARTIALLY_FILLED"
+    read_model = service.to_venue_event_read(event)
+    assert read_model.venue_status == "PARTIALLY_FILLED"
+    assert read_model.status_bucket == "partial"
+    assert read_model.ret_code is None
+
+
+def test_execution_intent_queue_extracts_ret_code_and_message() -> None:
+    service = ExecutionIntentQueueService()
+    ret_code, ret_msg = service.extract_venue_diagnostics(
+        {
+            "details": {
+                "response_body": {
+                    "retCode": 10001,
+                    "retMsg": "insufficient balance",
+                }
+            }
+        }
+    )
+
+    assert ret_code == 10001
+    assert ret_msg == "insufficient balance"
 
 
 async def test_execution_intent_queue_marks_cancelled_timestamp() -> None:

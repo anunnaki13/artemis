@@ -46,6 +46,8 @@ class FillQualitySummary:
     win_rate: Decimal
     average_fill_notional_usd: Decimal
     average_realized_pnl_per_fill_usd: Decimal
+    gross_adverse_slippage_cost_usd: Decimal
+    average_adverse_slippage_bps: Decimal
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,9 @@ class StrategyQualitySummary:
     gross_notional_usd: Decimal
     gross_realized_pnl_usd: Decimal
     win_rate: Decimal
+    gross_adverse_slippage_cost_usd: Decimal
+    average_adverse_slippage_bps: Decimal
+    gross_underfill_notional_usd: Decimal
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,9 @@ class IntentOutcomeSummary:
     realized_pnl_usd: Decimal
     fill_ratio: Decimal
     slippage_bps: Decimal | None
+    adverse_slippage_bps: Decimal | None
+    slippage_cost_usd: Decimal
+    underfill_notional_usd: Decimal
     last_fill_at: datetime | None
 
 
@@ -101,7 +109,37 @@ class IntentLineageOutcomeSummary:
     realized_pnl_usd: Decimal
     fill_ratio: Decimal
     slippage_bps: Decimal | None
+    adverse_slippage_bps: Decimal | None
+    slippage_cost_usd: Decimal
+    underfill_notional_usd: Decimal
     last_fill_at: datetime | None
+
+
+def _side_direction(side: str) -> Decimal:
+    normalized = side.strip().lower()
+    if normalized in {"buy", "long"}:
+        return Decimal("1")
+    if normalized in {"sell", "short"}:
+        return Decimal("-1")
+    return Decimal("1")
+
+
+def compute_slippage_metrics(
+    *,
+    side: str,
+    entry_price: Decimal,
+    average_fill_price: Decimal | None,
+    filled_quantity: Decimal,
+) -> tuple[Decimal | None, Decimal | None, Decimal]:
+    if average_fill_price is None or entry_price == Decimal("0"):
+        return None, None, Decimal("0")
+    direction = _side_direction(side)
+    signed_bps = ((average_fill_price - entry_price) / entry_price) * Decimal("10000")
+    signed_bps *= direction
+    adverse_bps = signed_bps if signed_bps > Decimal("0") else Decimal("0")
+    price_diff = (average_fill_price - entry_price) * direction
+    adverse_price_diff = price_diff if price_diff > Decimal("0") else Decimal("0")
+    return signed_bps, adverse_bps, adverse_price_diff * filled_quantity
 
 
 def summarize_fill_chains(fills: list[SpotExecutionFill]) -> list[FillChainSummary]:
@@ -148,11 +186,23 @@ def summarize_fill_quality(fills: list[SpotExecutionFill]) -> FillQualitySummary
     chains = summarize_fill_chains(fills)
     gross_notional = sum((fill.quote_quantity for fill in fills), Decimal("0"))
     gross_realized_pnl = sum((fill.realized_pnl_usd for fill in fills), Decimal("0"))
+    gross_adverse_slippage_cost = Decimal("0")
     winning_fills = sum(1 for fill in fills if fill.realized_pnl_usd > Decimal("0"))
     losing_fills = sum(1 for fill in fills if fill.realized_pnl_usd < Decimal("0"))
     flat_fills = fills_count - winning_fills - losing_fills
     average_fill_notional = gross_notional / fills_count if fills_count > 0 else Decimal("0")
     average_realized_pnl = gross_realized_pnl / fills_count if fills_count > 0 else Decimal("0")
+    adverse_slippage_points: list[Decimal] = []
+    for fill in fills:
+        _, adverse_bps, slippage_cost = compute_slippage_metrics(
+            side=fill.side,
+            entry_price=fill.price,
+            average_fill_price=fill.price,
+            filled_quantity=fill.quantity,
+        )
+        gross_adverse_slippage_cost += slippage_cost
+        if adverse_bps is not None:
+            adverse_slippage_points.append(adverse_bps)
     denominator = winning_fills + losing_fills
     win_rate = Decimal(winning_fills) / Decimal(denominator) if denominator > 0 else Decimal("0")
     traded_symbols_count = len({fill.symbol for fill in fills})
@@ -168,6 +218,12 @@ def summarize_fill_quality(fills: list[SpotExecutionFill]) -> FillQualitySummary
         win_rate=win_rate,
         average_fill_notional_usd=average_fill_notional,
         average_realized_pnl_per_fill_usd=average_realized_pnl,
+        gross_adverse_slippage_cost_usd=gross_adverse_slippage_cost,
+        average_adverse_slippage_bps=(
+            sum(adverse_slippage_points, Decimal("0")) / Decimal(len(adverse_slippage_points))
+            if adverse_slippage_points
+            else Decimal("0")
+        ),
     )
 
 
@@ -182,10 +238,23 @@ def summarize_strategy_quality(fills: list[SpotExecutionFill]) -> list[StrategyQ
         chains = summarize_fill_chains(strategy_fills)
         gross_notional = sum((fill.quote_quantity for fill in strategy_fills), Decimal("0"))
         gross_realized = sum((fill.realized_pnl_usd for fill in strategy_fills), Decimal("0"))
+        gross_slippage_cost = Decimal("0")
+        gross_underfill = Decimal("0")
+        adverse_slippage_points: list[Decimal] = []
         winning_fills = sum(1 for fill in strategy_fills if fill.realized_pnl_usd > Decimal("0"))
         losing_fills = sum(1 for fill in strategy_fills if fill.realized_pnl_usd < Decimal("0"))
         denominator = winning_fills + losing_fills
         win_rate = Decimal(winning_fills) / Decimal(denominator) if denominator > 0 else Decimal("0")
+        for fill in strategy_fills:
+            _, adverse_bps, slippage_cost = compute_slippage_metrics(
+                side=fill.side,
+                entry_price=fill.price,
+                average_fill_price=fill.price,
+                filled_quantity=fill.quantity,
+            )
+            gross_slippage_cost += slippage_cost
+            if adverse_bps is not None:
+                adverse_slippage_points.append(adverse_bps)
         summaries.append(
             StrategyQualitySummary(
                 source_strategy=strategy,
@@ -194,6 +263,13 @@ def summarize_strategy_quality(fills: list[SpotExecutionFill]) -> list[StrategyQ
                 gross_notional_usd=gross_notional,
                 gross_realized_pnl_usd=gross_realized,
                 win_rate=win_rate,
+                gross_adverse_slippage_cost_usd=gross_slippage_cost,
+                average_adverse_slippage_bps=(
+                    sum(adverse_slippage_points, Decimal("0")) / Decimal(len(adverse_slippage_points))
+                    if adverse_slippage_points
+                    else Decimal("0")
+                ),
+                gross_underfill_notional_usd=gross_underfill,
             )
         )
     return sorted(summaries, key=lambda item: (item.gross_realized_pnl_usd, item.gross_notional_usd), reverse=True)
@@ -229,10 +305,20 @@ def summarize_intent_outcomes(
             else Decimal("0")
         )
         slippage_bps: Decimal | None = None
-        if average_fill_price is not None and intent.entry_price != Decimal("0"):
-            direction = Decimal("1") if intent.side.upper() == "BUY" else Decimal("-1")
-            slippage_bps = ((average_fill_price - intent.entry_price) / intent.entry_price) * Decimal("10000")
-            slippage_bps *= direction
+        adverse_slippage_bps: Decimal | None = None
+        slippage_cost_usd = Decimal("0")
+        if average_fill_price is not None:
+            slippage_bps, adverse_slippage_bps, slippage_cost_usd = compute_slippage_metrics(
+                side=intent.side,
+                entry_price=intent.entry_price,
+                average_fill_price=average_fill_price,
+                filled_quantity=filled_quantity,
+            )
+        underfill_notional_usd = (
+            intent.approved_notional - filled_quote_quantity
+            if intent.approved_notional > filled_quote_quantity
+            else Decimal("0")
+        )
 
         summaries.append(
             IntentOutcomeSummary(
@@ -254,6 +340,9 @@ def summarize_intent_outcomes(
                 realized_pnl_usd=realized_pnl,
                 fill_ratio=fill_ratio,
                 slippage_bps=slippage_bps,
+                adverse_slippage_bps=adverse_slippage_bps,
+                slippage_cost_usd=slippage_cost_usd,
+                underfill_notional_usd=underfill_notional_usd,
                 last_fill_at=ordered_fills[-1].filled_at if ordered_fills else None,
             )
         )
@@ -328,6 +417,15 @@ def summarize_intent_lineage_outcomes(
                     else Decimal("0")
                 ),
                 slippage_bps=latest_outcome.slippage_bps,
+                adverse_slippage_bps=latest_outcome.adverse_slippage_bps,
+                slippage_cost_usd=sum((item.slippage_cost_usd for item in lineage_intent_outcomes), Decimal("0")),
+                underfill_notional_usd=(
+                    latest_intent.approved_notional
+                    - sum((fill.quote_quantity for fill in lineage_fills), Decimal("0"))
+                    if latest_intent.approved_notional
+                    > sum((fill.quote_quantity for fill in lineage_fills), Decimal("0"))
+                    else Decimal("0")
+                ),
                 last_fill_at=max((fill.filled_at for fill in lineage_fills), default=None),
             )
         )

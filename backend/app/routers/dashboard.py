@@ -11,6 +11,7 @@ from app.db import get_session
 from app.deps import get_current_user
 from app.models import (
     ExecutionIntent,
+    ExecutionVenueEvent,
     MarketSnapshot,
     SpotAccountBalance,
     SpotExecutionFill,
@@ -166,6 +167,32 @@ async def summary(
     ][:5]
     digest_run_rows = await digest_service.list_run_logs(session, 3)
     digest_alert = next((item for item in digest_run_rows if item.anomaly_score > 0), None)
+    recent_venue_events = list(
+        (
+            await session.scalars(
+                select(ExecutionVenueEvent)
+                .order_by(ExecutionVenueEvent.created_at.desc())
+                .limit(50)
+            )
+        ).all()
+    )
+    venue_event_summary = {
+        "accepted": 0,
+        "partial": 0,
+        "filled": 0,
+        "cancelled": 0,
+        "rejected": 0,
+        "pending": 0,
+        "unknown": 0,
+    }
+    for event in recent_venue_events:
+        status_bucket = intent_queue_service.classify_venue_status(event.venue_status)
+        venue_event_summary[status_bucket] += 1
+    filtered_venue_events = [
+        event
+        for event in recent_venue_events
+        if intent_queue_service.classify_venue_status(event.venue_status) in {"partial", "cancelled", "rejected"}
+    ][:6]
 
     return {
         "equity": {"net": equity, "currency": "USDT"},
@@ -196,6 +223,9 @@ async def summary(
                 "gross_notional_usd": item.gross_notional_usd,
                 "gross_realized_pnl_usd": item.gross_realized_pnl_usd,
                 "win_rate": item.win_rate,
+                "gross_adverse_slippage_cost_usd": item.gross_adverse_slippage_cost_usd,
+                "average_adverse_slippage_bps": item.average_adverse_slippage_bps,
+                "gross_underfill_notional_usd": item.gross_underfill_notional_usd,
             }
             for item in strategy_breakdown
         ],
@@ -225,6 +255,24 @@ async def summary(
                 "last_fill_at": item.last_fill_at,
             }
             for item in replacement_alerts
+        ],
+        "venue_event_summary": venue_event_summary,
+        "venue_event_alerts": [
+            {
+                "id": int(event.id),
+                "created_at": event.created_at,
+                "venue": event.venue,
+                "event_type": event.event_type,
+                "venue_status": event.venue_status,
+                "status_bucket": intent_queue_service.classify_venue_status(event.venue_status),
+                "symbol": event.symbol,
+                "client_order_id": event.client_order_id,
+                "venue_order_id": event.venue_order_id,
+                "reconcile_state": event.reconcile_state,
+                "ret_code": intent_queue_service.extract_venue_diagnostics(event.payload)[0],
+                "ret_msg": intent_queue_service.extract_venue_diagnostics(event.payload)[1],
+            }
+            for event in filtered_venue_events
         ],
         "digest_runs": [
             {

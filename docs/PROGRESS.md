@@ -1,6 +1,63 @@
 # Progress Log
 
+## 2026-05-02
+
+### Completed
+
+- Promoted Bybit to the active venue runtime across market data, execution preview, and private-stream account sync.
+- Added Bybit REST/WebSocket market-data clients and stream service for:
+  - Spot symbol sync
+  - candle ingestion
+  - ticker snapshots
+  - orderbook depth updates
+  - funding-rate and open-interest polling
+- Added Bybit execution runtime, adapter, authenticated transport, and private-stream consumer.
+- Switched owner settings surface from Binance credentials to Bybit credentials and account metadata.
+- Added live/private-access Bybit runtime guardrails:
+  - `BYBIT_ACCOUNT_TYPE` must be `UNIFIED`
+  - `BYBIT_WHITELISTED_IP` must be configured
+  - `BYBIT_WITHDRAWAL_ENABLED` must remain `false`
+- Trimmed the active execution package surface to Bybit-first exports only.
+- Removed legacy Binance runtime modules and legacy Binance unit suites from the active repository path.
+- Imported [BINANCE-TO-BYBIT-MIGRATION.md](/home/damnation/trade/BINANCE-TO-BYBIT-MIGRATION.md:1) into the local repository so the migration blueprint now lives with the working tree.
+- Hardened live Bybit transport so `retCode != 0` is treated as venue failure even on HTTP `200`.
+- Added venue diagnostics and operator alerting for Bybit reject/cancel/partial events:
+  - `/api/execution/venues/events`
+  - `/api/execution/venues/events/export`
+  - dashboard venue-event summary and alert cards
+- Added execution-cost analytics:
+  - adverse slippage bps
+  - adverse slippage cost
+  - underfill notional
+- Surfaced execution-cost metrics in:
+  - dashboard strategy cohorts
+  - Journal
+  - Execution Quality
+
+### Current Delivered Sequence
+
+1. foundation, auth, settings vault
+2. market-data ingestion and orderbook reconstruction
+3. strategy evaluation and risk gate
+4. execution queue, lifecycle, reconciliation, cancel, and replace
+5. venue account sync, balances, positions, and PnL
+6. journal, execution-quality, and execution-cost analytics
+7. venue diagnostics and operator alerting
+8. dashboard exports, digests, anomaly tracking, and digest trend tooling
+9. Bybit-primary venue migration and runtime safety gating
+
+### Next Development Sequence
+
+1. build dedicated Venue Events review page and deeper operator filters
+2. strengthen lot-level PnL and close accounting
+3. expand strategy registry
+4. build research pipeline: backtest, walk-forward, Monte Carlo, sensitivity
+5. add recovery, dead-man switch, and alerting hardening
+6. integrate AI Analyst backend and approval workflow
+
 ## 2026-05-01
+
+Historical note: the entries below describe the original first-pass venue implementation before the repository was cut over to a Bybit-primary runtime on `2026-05-02`.
 
 ### Completed
 
@@ -275,7 +332,7 @@ Remaining before Phase 1:
 
 ### Not Started Yet
 
-- Binance public market-data WebSocket service.
+- Historical note: this 2026-04-30 snapshot predates the Bybit cutover and should not be read as current runtime status.
 - Candle aggregation and orderbook sync.
 - Strategy registry and baseline strategies.
 - Backtest pipeline.

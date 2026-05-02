@@ -10,6 +10,7 @@ from app.schemas.execution import (
     ExecutionVenueEventRead,
     LifecycleStatus,
     VenueEventState,
+    VenueStatusBucket,
 )
 from app.schemas.risk import SignalRiskEvaluateRequest, SignalRiskEvaluateResponse
 from app.schemas.risk import SignalRiskEvaluateResponse as RiskResponseSchema
@@ -29,6 +30,47 @@ IntentStatus = Literal[
 
 
 class ExecutionIntentQueueService:
+    def classify_venue_status(self, venue_status: str) -> VenueStatusBucket:
+        normalized = venue_status.strip().upper()
+        if normalized in {"NEW", "CREATED", "ACCEPTED", "PARTIALLY_FILLED", "PARTIALFILLED"}:
+            if "PARTIAL" in normalized:
+                return "partial"
+            return "accepted"
+        if normalized in {"FILLED"}:
+            return "filled"
+        if normalized in {"CANCELED", "CANCELLED", "CANCELLED_BY_USER", "DEACTIVATED", "EXPIRED"}:
+            return "cancelled"
+        if normalized in {"REJECTED", "FAILED"}:
+            return "rejected"
+        if normalized in {"PENDING", "TRIGGERED", "ACTIVE"}:
+            return "pending"
+        return "unknown"
+
+    def extract_venue_diagnostics(self, payload: dict[str, Any]) -> tuple[int | None, str | None]:
+        details = payload.get("details")
+        if isinstance(details, dict):
+            if isinstance(details.get("response_body"), dict):
+                body = details["response_body"]
+                ret_code = body.get("retCode")
+                ret_msg = body.get("retMsg")
+                return self._parse_ret_code(ret_code), str(ret_msg) if ret_msg is not None else None
+            raw_event = details.get("raw_event")
+            if isinstance(raw_event, dict):
+                ret_code = raw_event.get("retCode") or raw_event.get("rejectReasonCode")
+                ret_msg = raw_event.get("retMsg") or raw_event.get("rejectReason")
+                return self._parse_ret_code(ret_code), str(ret_msg) if ret_msg is not None else None
+        ret_code = payload.get("retCode")
+        ret_msg = payload.get("retMsg")
+        return self._parse_ret_code(ret_code), str(ret_msg) if ret_msg is not None else None
+
+    def _parse_ret_code(self, value: object) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(str(value))
+        except (TypeError, ValueError):
+            return None
+
     async def find_by_order_id(
         self,
         session: AsyncSession,
@@ -276,6 +318,7 @@ class ExecutionIntentQueueService:
         )
 
     def to_venue_event_read(self, event: ExecutionVenueEvent) -> ExecutionVenueEventRead:
+        ret_code, ret_msg = self.extract_venue_diagnostics(event.payload)
         return ExecutionVenueEventRead(
             id=int(event.id),
             created_at=event.created_at,
@@ -288,5 +331,8 @@ class ExecutionIntentQueueService:
             client_order_id=event.client_order_id,
             venue_order_id=event.venue_order_id,
             reconcile_state=cast(VenueEventState, event.reconcile_state),
+            status_bucket=self.classify_venue_status(event.venue_status),
+            ret_code=ret_code,
+            ret_msg=ret_msg,
             payload=event.payload,
         )

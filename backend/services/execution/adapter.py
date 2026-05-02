@@ -1,10 +1,11 @@
 import hashlib
 import hmac
+import json
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
-from urllib.parse import urlencode
+from typing import Mapping
 from uuid import uuid4
 
 import httpx
@@ -29,33 +30,27 @@ class ExecutionTransportError(Exception):
 
 
 @dataclass(frozen=True)
-class BinanceOrderRequest:
+class BybitOrderRequest:
+    category: str
     symbol: str
     side: str
     order_type: str
-    time_in_force: str
-    quantity: str
+    qty: str
     price: str
-    new_client_order_id: str
-    recv_window: int
-    timestamp: int
+    order_link_id: str
+    time_in_force: str
 
-    def signed_payload(self, secret: str) -> dict[str, str | int]:
-        payload: dict[str, str | int] = {
+    def payload(self) -> dict[str, str]:
+        return {
+            "category": self.category,
             "symbol": self.symbol,
-            "side": self.side.upper(),
-            "type": self.order_type,
-            "timeInForce": self.time_in_force,
-            "quantity": self.quantity,
+            "side": self.side,
+            "orderType": self.order_type,
+            "qty": self.qty,
             "price": self.price,
-            "newClientOrderId": self.new_client_order_id,
-            "recvWindow": self.recv_window,
-            "timestamp": self.timestamp,
+            "orderLinkId": self.order_link_id,
+            "timeInForce": self.time_in_force,
         }
-        query = urlencode(payload)
-        signature = hmac.new(secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
-        payload["signature"] = signature
-        return payload
 
 
 @dataclass(frozen=True)
@@ -94,7 +89,7 @@ class ExecutionCancel:
 
 class ExecutionTransport(ABC):
     @abstractmethod
-    async def submit_binance_order(self, request: BinanceOrderRequest) -> ExecutionDispatch:
+    async def submit_order(self, request: BybitOrderRequest) -> ExecutionDispatch:
         raise NotImplementedError
 
     @abstractmethod
@@ -106,7 +101,7 @@ class ExecutionTransport(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def cancel_binance_order(self, intent: ExecutionIntent) -> ExecutionCancel:
+    async def cancel_order(self, intent: ExecutionIntent) -> ExecutionCancel:
         raise NotImplementedError
 
 
@@ -124,19 +119,16 @@ class ExecutionAdapter(ABC):
         raise NotImplementedError
 
 
-class StubBinanceExecutionTransport(ExecutionTransport):
-    async def submit_binance_order(self, request: BinanceOrderRequest) -> ExecutionDispatch:
+class StubBybitExecutionTransport(ExecutionTransport):
+    async def submit_order(self, request: BybitOrderRequest) -> ExecutionDispatch:
         accepted_at = datetime.now(tz=timezone.utc)
         return ExecutionDispatch(
-            client_order_id=request.new_client_order_id,
-            venue_order_id=f"binance-stub-{uuid4().hex[:16]}",
-            venue="binance",
-            venue_status="NEW",
+            client_order_id=request.order_link_id,
+            venue_order_id=f"bybit-stub-{uuid4().hex[:16]}",
+            venue="bybit",
+            venue_status="New",
             accepted_at=accepted_at,
-            details={
-                "transport": "stub",
-                "request": asdict(request),
-            },
+            details={"transport": "stub", "request": request.payload()},
         )
 
     async def simulate_fill(
@@ -153,48 +145,91 @@ class StubBinanceExecutionTransport(ExecutionTransport):
             venue=dispatch.venue,
             client_order_id=dispatch.client_order_id,
             venue_order_id=dispatch.venue_order_id,
-            venue_status="FILLED",
-            details={
-                **dispatch.details,
-                "simulated_fill": True,
-            },
+            venue_status="Filled",
+            details={**dispatch.details, "simulated_fill": True},
         )
 
-    async def cancel_binance_order(self, intent: ExecutionIntent) -> ExecutionCancel:
+    async def cancel_order(self, intent: ExecutionIntent) -> ExecutionCancel:
         return ExecutionCancel(
             status="cancelled",
             cancelled_at=datetime.now(tz=timezone.utc),
-            venue="binance",
+            venue="bybit",
             client_order_id=intent.client_order_id,
             venue_order_id=intent.venue_order_id,
-            venue_status="CANCELED",
+            venue_status="Cancelled",
             details={"transport": "stub", "simulated_cancel": True},
         )
 
 
-class BinanceAuthenticatedExecutionTransport(ExecutionTransport):
+class BybitAuthenticatedExecutionTransport(ExecutionTransport):
     def __init__(
         self,
         *,
         api_key: str,
         api_secret: str,
         base_url: str,
+        recv_window: int = 5000,
         http_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = base_url.rstrip("/")
+        self.recv_window = recv_window
         self.http_transport = http_transport
 
-    async def submit_binance_order(self, request: BinanceOrderRequest) -> ExecutionDispatch:
-        payload = request.signed_payload(self.api_secret)
-        headers = {"X-MBX-APIKEY": self.api_key}
+    def _sign(self, timestamp: int, payload: Mapping[str, object]) -> tuple[str, str]:
+        body = json.dumps(dict(payload), separators=(",", ":"), sort_keys=True)
+        sign_payload = f"{timestamp}{self.api_key}{self.recv_window}{body}"
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            sign_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return signature, body
+
+    def _validate_success_payload(
+        self,
+        payload_response: object,
+        *,
+        action: str,
+        status_code: int,
+    ) -> dict[str, object]:
+        if not isinstance(payload_response, dict):
+            raise ValueError(f"unexpected bybit {action} response")
+        ret_code = payload_response.get("retCode", 0)
+        try:
+            normalized_ret_code = int(ret_code)
+        except (TypeError, ValueError):
+            normalized_ret_code = -1
+        if normalized_ret_code != 0:
+            raise ExecutionTransportError(
+                f"bybit {action} failed",
+                venue="bybit",
+                status_code=status_code,
+                response_body=payload_response,
+            )
+        result = payload_response.get("result", {})
+        if not isinstance(result, dict):
+            raise ValueError(f"unexpected bybit {action} result")
+        return result
+
+    async def submit_order(self, request: BybitOrderRequest) -> ExecutionDispatch:
+        timestamp = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+        payload = request.payload()
+        signature, body = self._sign(timestamp, payload)
+        headers = {
+            "X-BAPI-API-KEY": self.api_key,
+            "X-BAPI-TIMESTAMP": str(timestamp),
+            "X-BAPI-SIGN": signature,
+            "X-BAPI-RECV-WINDOW": str(self.recv_window),
+            "Content-Type": "application/json",
+        }
         async with httpx.AsyncClient(
             base_url=self.base_url,
             timeout=15.0,
             transport=self.http_transport,
         ) as client:
-            response = await client.post("/api/v3/order", data=payload, headers=headers)
+            response = await client.post("/v5/order/create", content=body, headers=headers)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -203,22 +238,24 @@ class BinanceAuthenticatedExecutionTransport(ExecutionTransport):
                 except ValueError:
                     error_body = response.text
                 raise ExecutionTransportError(
-                    "binance order submission failed",
-                    venue="binance",
+                    "bybit order submission failed",
+                    venue="bybit",
                     status_code=response.status_code,
                     response_body=error_body,
                 ) from exc
-            body = response.json()
-        if not isinstance(body, dict):
-            raise ValueError("unexpected binance order response")
-        accepted_at = datetime.now(tz=timezone.utc)
+            payload_response = response.json()
+        result = self._validate_success_payload(
+            payload_response,
+            action="order submission",
+            status_code=response.status_code,
+        )
         return ExecutionDispatch(
-            client_order_id=str(body.get("clientOrderId", request.new_client_order_id)),
-            venue_order_id=str(body.get("orderId", "")),
-            venue="binance",
-            venue_status=str(body.get("status", "NEW")),
-            accepted_at=accepted_at,
-            details={"transport": "authenticated", "response": body},
+            client_order_id=str(result.get("orderLinkId", request.order_link_id)),
+            venue_order_id=str(result.get("orderId", "")),
+            venue="bybit",
+            venue_status=str(result.get("orderStatus", "New")),
+            accepted_at=datetime.now(tz=timezone.utc),
+            details={"transport": "authenticated", "response": payload_response},
         )
 
     async def simulate_fill(
@@ -226,30 +263,34 @@ class BinanceAuthenticatedExecutionTransport(ExecutionTransport):
         intent: ExecutionIntent,
         dispatch: ExecutionDispatch,
     ) -> ExecutionResult:
-        raise RuntimeError("authenticated binance transport requires asynchronous venue reconciliation")
+        raise RuntimeError("authenticated bybit transport requires asynchronous venue reconciliation")
 
-    async def cancel_binance_order(self, intent: ExecutionIntent) -> ExecutionCancel:
-        payload: dict[str, str | int] = {
+    async def cancel_order(self, intent: ExecutionIntent) -> ExecutionCancel:
+        timestamp = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+        payload: dict[str, object] = {
+            "category": "spot",
             "symbol": intent.symbol,
-            "recvWindow": 5000,
-            "timestamp": int(datetime.now(tz=timezone.utc).timestamp() * 1000),
         }
-        if intent.client_order_id:
-            payload["origClientOrderId"] = intent.client_order_id
-        elif intent.venue_order_id:
+        if intent.venue_order_id:
             payload["orderId"] = intent.venue_order_id
+        elif intent.client_order_id:
+            payload["orderLinkId"] = intent.client_order_id
         else:
             raise ValueError("dispatching intent is missing client_order_id and venue_order_id")
-        query = urlencode(payload)
-        signature = hmac.new(self.api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
-        payload["signature"] = signature
-        headers = {"X-MBX-APIKEY": self.api_key}
+        signature, body = self._sign(timestamp, payload)
+        headers = {
+            "X-BAPI-API-KEY": self.api_key,
+            "X-BAPI-TIMESTAMP": str(timestamp),
+            "X-BAPI-SIGN": signature,
+            "X-BAPI-RECV-WINDOW": str(self.recv_window),
+            "Content-Type": "application/json",
+        }
         async with httpx.AsyncClient(
             base_url=self.base_url,
             timeout=15.0,
             transport=self.http_transport,
         ) as client:
-            response = await client.delete("/api/v3/order", params=payload, headers=headers)
+            response = await client.post("/v5/order/cancel", content=body, headers=headers)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -258,60 +299,66 @@ class BinanceAuthenticatedExecutionTransport(ExecutionTransport):
                 except ValueError:
                     error_body = response.text
                 raise ExecutionTransportError(
-                    "binance order cancellation failed",
-                    venue="binance",
+                    "bybit order cancellation failed",
+                    venue="bybit",
                     status_code=response.status_code,
                     response_body=error_body,
                 ) from exc
-            body = response.json()
-        if not isinstance(body, dict):
-            raise ValueError("unexpected binance cancel response")
+            payload_response = response.json()
+        result = self._validate_success_payload(
+            payload_response,
+            action="order cancellation",
+            status_code=response.status_code,
+        )
         return ExecutionCancel(
             status="cancelled",
             cancelled_at=datetime.now(tz=timezone.utc),
-            venue="binance",
-            client_order_id=str(body.get("clientOrderId", intent.client_order_id or "")) or intent.client_order_id,
-            venue_order_id=str(body.get("orderId", intent.venue_order_id or "")) or intent.venue_order_id,
-            venue_status=str(body.get("status", "CANCELED")),
-            details={"transport": "authenticated", "response": body},
+            venue="bybit",
+            client_order_id=str(result.get("orderLinkId", intent.client_order_id or "")) or intent.client_order_id,
+            venue_order_id=str(result.get("orderId", intent.venue_order_id or "")) or intent.venue_order_id,
+            venue_status=str(result.get("orderStatus", "Cancelled")),
+            details={"transport": "authenticated", "response": payload_response},
         )
 
 
-class BinanceExecutionAdapter(ExecutionAdapter):
+class BybitExecutionAdapter(ExecutionAdapter):
     def __init__(
         self,
         transport: ExecutionTransport | None = None,
-        recv_window: int = 5000,
     ) -> None:
-        self.transport = transport or StubBinanceExecutionTransport()
-        self.recv_window = recv_window
+        self.transport = transport or StubBybitExecutionTransport()
 
     async def dispatch(self, intent: ExecutionIntent) -> ExecutionDispatch:
         request = self.build_order_request(intent)
-        return await self.transport.submit_binance_order(request)
+        return await self.transport.submit_order(request)
 
     async def execute(self, intent: ExecutionIntent, dispatch: ExecutionDispatch) -> ExecutionResult:
         return await self.transport.simulate_fill(intent, dispatch)
 
     async def cancel(self, intent: ExecutionIntent) -> ExecutionCancel:
-        return await self.transport.cancel_binance_order(intent)
+        return await self.transport.cancel_order(intent)
 
-    def build_order_request(self, intent: ExecutionIntent) -> BinanceOrderRequest:
-        timestamp = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    def build_order_request(self, intent: ExecutionIntent) -> BybitOrderRequest:
         quantity = (intent.approved_notional / intent.entry_price).quantize(
             Decimal("0.00000001"),
             rounding=ROUND_DOWN,
         )
-        return BinanceOrderRequest(
+        normalized_side = intent.side.strip().lower()
+        if normalized_side in {"buy", "long"}:
+            side = "Buy"
+        elif normalized_side in {"sell", "short"}:
+            side = "Sell"
+        else:
+            raise ValueError(f"unsupported execution side: {intent.side}")
+        return BybitOrderRequest(
+            category="spot",
             symbol=intent.symbol,
-            side=intent.side.upper(),
-            order_type="LIMIT",
-            time_in_force="GTC",
-            quantity=format(quantity, "f"),
+            side=side,
+            order_type="Limit",
+            qty=format(quantity, "f"),
             price=format(intent.entry_price, "f"),
-            new_client_order_id=self._client_order_id(intent),
-            recv_window=self.recv_window,
-            timestamp=timestamp,
+            order_link_id=self._client_order_id(intent),
+            time_in_force="GTC",
         )
 
     def _client_order_id(self, intent: ExecutionIntent) -> str:

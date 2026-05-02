@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.models import ExecutionIntent
 from services.execution.adapter import (
-    BinanceExecutionAdapter,
+    BybitExecutionAdapter,
     ExecutionCancel,
     ExecutionAdapter,
     ExecutionTransportError,
@@ -17,6 +17,17 @@ from services.execution.intent_queue import ExecutionIntentQueueService
 
 
 class ExecutionWorkerService:
+    def _extract_error_diagnostics(self, response_body: object) -> tuple[int | None, str | None]:
+        if not isinstance(response_body, dict):
+            return None, None
+        ret_code = response_body.get("retCode")
+        ret_msg = response_body.get("retMsg")
+        try:
+            parsed_code = int(str(ret_code)) if ret_code is not None else None
+        except (TypeError, ValueError):
+            parsed_code = None
+        return parsed_code, str(ret_msg) if ret_msg is not None else None
+
     def __init__(
         self,
         queue_service: ExecutionIntentQueueService,
@@ -28,7 +39,7 @@ class ExecutionWorkerService:
         if adapter is not None:
             self.adapter = adapter
         elif settings.mode in {"live_micro", "live_scaled"}:
-            self.adapter = BinanceExecutionAdapter()
+            self.adapter = BybitExecutionAdapter()
         else:
             self.adapter = PaperExecutionAdapter()
         self.dispatch_timeout_seconds = (
@@ -70,6 +81,7 @@ class ExecutionWorkerService:
             )
             result = await self.adapter.execute(intent, dispatch)
         except ExecutionTransportError as exc:
+            ret_code, ret_msg = self._extract_error_diagnostics(exc.response_body)
             return await self.queue_service.update_status(
                 session,
                 intent=intent,
@@ -81,6 +93,8 @@ class ExecutionWorkerService:
                     "venue": exc.venue,
                     "status_code": exc.status_code,
                     "response_body": exc.response_body,
+                    "ret_code": ret_code,
+                    "ret_msg": ret_msg,
                     "source": "dispatch_error",
                 },
                 execution_venue=exc.venue,
@@ -261,6 +275,7 @@ class ExecutionWorkerService:
         try:
             cancel = await self.adapter.cancel(pending)
         except ExecutionTransportError as exc:
+            ret_code, ret_msg = self._extract_error_diagnostics(exc.response_body)
             return await self.queue_service.update_execution_metadata(
                 session,
                 intent=pending,
@@ -271,6 +286,8 @@ class ExecutionWorkerService:
                     "venue": exc.venue,
                     "status_code": exc.status_code,
                     "response_body": exc.response_body,
+                    "ret_code": ret_code,
+                    "ret_msg": ret_msg,
                     "requested_at": datetime.now(tz=timezone.utc).isoformat(),
                     "source": "cancel_request_error",
                 },

@@ -53,6 +53,17 @@ function formatPercent(value: number | string | null | undefined) {
   return `${(parsed * 100).toFixed(1)}%`;
 }
 
+function formatBps(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "--";
+  }
+  return `${parsed.toFixed(2)} bps`;
+}
+
 function toneClass(value: number) {
   if (value > 0) {
     return "text-profit";
@@ -145,6 +156,8 @@ export default function ExecutionQualityPage() {
   const summary = state.summary;
   const grossRealized = Number(summary?.gross_realized_pnl_usd ?? 0);
   const averageRealized = Number(summary?.average_realized_pnl_per_fill_usd ?? 0);
+  const grossAdverseSlippage = Number(summary?.gross_adverse_slippage_cost_usd ?? 0);
+  const averageAdverseSlippage = Number(summary?.average_adverse_slippage_bps ?? 0);
   const strategyOptions = useMemo(() => {
     return Array.from(
       new Set(
@@ -289,7 +302,7 @@ export default function ExecutionQualityPage() {
         </div>
       </Panel>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <Panel title="Win Rate">
           <div className="text-2xl font-semibold">{formatPercent(summary?.win_rate)}</div>
           <div className="mt-2 font-mono text-[11px] text-muted">{summary?.winning_fills_count ?? 0} wins / {summary?.losing_fills_count ?? 0} losses</div>
@@ -305,6 +318,12 @@ export default function ExecutionQualityPage() {
         <Panel title="Average Realized">
           <div className={`text-2xl font-semibold ${toneClass(averageRealized)}`}>${formatNumber(summary?.average_realized_pnl_per_fill_usd)}</div>
           <div className="mt-2 font-mono text-[11px] text-muted">{summary?.chains_count ?? 0} order chains</div>
+        </Panel>
+        <Panel title="Execution Cost">
+          <div className={`text-2xl font-semibold ${grossAdverseSlippage > 0 ? "text-warning" : "text-secondary"}`}>
+            ${formatNumber(summary?.gross_adverse_slippage_cost_usd)}
+          </div>
+          <div className="mt-2 font-mono text-[11px] text-muted">Avg adverse {formatBps(summary?.average_adverse_slippage_bps)}</div>
         </Panel>
       </div>
 
@@ -341,6 +360,8 @@ export default function ExecutionQualityPage() {
                   <th className="pb-2">Fills</th>
                   <th className="pb-2">Win Rate</th>
                   <th className="pb-2">Realized</th>
+                  <th className="pb-2">Slip Cost</th>
+                  <th className="pb-2">Underfill</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -352,6 +373,11 @@ export default function ExecutionQualityPage() {
                     <td className={`py-2 ${toneClass(Number(row.gross_realized_pnl_usd))}`}>
                       ${formatNumber(row.gross_realized_pnl_usd)}
                     </td>
+                    <td className={`py-2 ${Number(row.gross_adverse_slippage_cost_usd) > 0 ? "text-warning" : "text-secondary"}`}>
+                      ${formatNumber(row.gross_adverse_slippage_cost_usd)}
+                      <div className="font-mono text-[11px] text-muted">{formatBps(row.average_adverse_slippage_bps)}</div>
+                    </td>
+                    <td className="py-2 text-warning">${formatNumber(row.gross_underfill_notional_usd)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -420,6 +446,7 @@ export default function ExecutionQualityPage() {
                 <th className="pb-2">Replacements</th>
                 <th className="pb-2">Filled</th>
                 <th className="pb-2">Slip</th>
+                <th className="pb-2">Cost</th>
                 <th className="pb-2">Realized</th>
               </tr>
             </thead>
@@ -436,7 +463,14 @@ export default function ExecutionQualityPage() {
                   <td className="py-2">{Math.max(lineage.lineage_size - 1, 0)}</td>
                   <td className="py-2">{formatPercent(lineage.fill_ratio)}</td>
                   <td className={`py-2 ${Number(lineage.slippage_bps ?? 0) <= 0 ? "text-profit" : "text-warning"}`}>
-                    {formatNumber(lineage.slippage_bps, 2)} bps
+                    <div>{formatBps(lineage.slippage_bps)}</div>
+                    <div className="font-mono text-[11px] text-muted">adv {formatBps(lineage.adverse_slippage_bps)}</div>
+                  </td>
+                  <td className="py-2">
+                    <div className={Number(lineage.slippage_cost_usd) > 0 ? "text-warning" : "text-secondary"}>
+                      ${formatNumber(lineage.slippage_cost_usd)}
+                    </div>
+                    <div className="font-mono text-[11px] text-muted">under ${formatNumber(lineage.underfill_notional_usd)}</div>
                   </td>
                   <td className={`py-2 ${toneClass(Number(lineage.realized_pnl_usd))}`}>
                     ${formatNumber(lineage.realized_pnl_usd)}
@@ -445,7 +479,7 @@ export default function ExecutionQualityPage() {
               ))}
               {filteredLineages.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-4 text-center text-muted">
+                  <td colSpan={7} className="py-4 text-center text-muted">
                     No replacement lineage outcomes yet.
                   </td>
                 </tr>

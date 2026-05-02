@@ -1,6 +1,6 @@
 # Implementation Status
 
-This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
+This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migration. Bybit is now the primary and only active runtime venue in the repository; older progress entries may still describe the original first-pass Binance implementation as historical context.
 
 ## Implemented
 
@@ -13,10 +13,10 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Frontend owner register/login flow wired to backend auth endpoints, including TOTP enrollment output.
 - Redis-backed auth rate limits, JWT session registry, `/auth/me`, and `/auth/logout` foundation.
 - Frontend app route guard validates the HttpOnly cookie session through `/auth/me`.
-- Binance public REST market-data ingestion for Spot symbols and candles.
-- Binance WebSocket market-data streaming foundation with owner-controlled start/stop/status endpoints.
-- Orderbook top-of-book snapshots from Binance depth-delta streams.
-- Funding-rate and open-interest polling snapshots from Binance Futures public endpoints.
+- Bybit public REST market-data ingestion for Spot symbols and candles.
+- Bybit public WebSocket market-data streaming foundation with owner-controlled start/stop/status endpoints.
+- Orderbook top-of-book snapshots from Bybit depth-delta streams.
+- Funding-rate and open-interest polling snapshots from Bybit linear public endpoints.
 - In-memory orderbook ladder reconstruction with derived spread, imbalance, and 0.5% liquidity-depth metrics.
 - Depth-gap recovery by per-symbol orderbook rebootstrap, plus persisted liquidity-metric read endpoints.
 - Dedicated `orderbook_snapshots` persistence for historical ladder slices and derived metrics.
@@ -27,11 +27,12 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Reconciliation endpoint and stale-dispatch timeout sweep for execution lifecycle control.
 - Stable execution adapter contract with persisted client/venue order identifiers.
 - Order-id-based lookup and reconciliation for venue-facing lifecycle events.
-- Stubbed Binance execution adapter contract with transport abstraction and signed order-request builder.
-- Runtime Binance credential resolution and safe signed-order preview endpoint.
-- Runtime-selected execution transport gating with authenticated Binance path guarded behind explicit enablement.
+- Stubbed Bybit execution adapter contract with transport abstraction and signed order-request builder.
+- Runtime Bybit credential resolution and safe signed-order preview endpoint.
+- Runtime-selected execution transport gating with authenticated Bybit path guarded behind explicit enablement.
 - Feed-driven execution reconciliation with persisted raw venue events and async venue-status mapping.
-- Binance venue-native user-stream consumer for async execution updates with owner-controlled lifecycle endpoints.
+- Bybit venue-native private-stream consumer for async execution updates with owner-controlled lifecycle endpoints.
+- Runtime safety gating for Bybit live/private access requiring `UNIFIED`, whitelist IP, and withdrawal-disabled acknowledgement.
 - Spot account-balance reconciliation from venue account events with persisted read model.
 - Spot symbol-exposure reconciliation from execution fills with persisted average-entry and exposure state.
 - Risk-gate consumption of persisted spot exposure state for open-position and total-exposure enforcement.
@@ -43,11 +44,13 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 - Execution-quality and journal summary reads derived from the per-fill ledger.
 - Fill-ledger attribution to execution intents and source strategies.
 - Dashboard/operator read models for strategy cohorts, lineage alerts, digest artifacts, digest anomaly banner, and digest trend series.
+- Dashboard/operator read models for Bybit venue diagnostics, strategy cohorts, lineage alerts, digest artifacts, digest anomaly banner, and digest trend series.
 - Journal and Execution Quality pages backed by live fill-ledger, chain-summary, lineage-outcome, and strategy-attribution APIs.
+- Execution-cost analytics for adverse slippage cost, adverse slippage bps, and underfill notional across fill summaries, intent outcomes, lineage outcomes, and strategy cohorts.
 - Daily digest runner with retention, Telegram completion notice, anomaly scoring, persisted `daily_digest_runs`, range-filtered digest series, and series CSV export.
 - Capital Profile Manager with v2.1 MICRO/SMALL/STANDARD/SCALED rules and growth-plan config.
 - Telegram notification skeleton with protected test endpoint and encrypted settings lookup.
-- Symbol Universe Manager foundation with Binance 24h ticker filtering and blacklist enforcement.
+- Symbol Universe Manager foundation with Bybit 24h ticker filtering and blacklist enforcement.
 - Basic docs, prompt templates, CI, Makefile, lint, test, and typecheck workflows.
 - Frontend exposed on VPS port `3066`.
 - Settings Vault UI can submit blueprint credentials to the backend without browser secret storage.
@@ -67,12 +70,12 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 
 ## Not Implemented Yet
 
-- Candle aggregation and snapshot persistence exist for Binance kline, mini-ticker, book-ticker, depth-delta, funding-rate, and open-interest feeds; orderbook ladders are reconstructed in memory, liquidity metrics are exposed both live and from recent persisted snapshots, and dedicated orderbook snapshot history is now persisted, while full unthrottled ladder persistence is still pending.
+- Candle aggregation and snapshot persistence exist for Bybit kline, ticker, depth-delta, funding-rate, and open-interest feeds; orderbook ladders are reconstructed in memory, liquidity metrics are exposed both live and from recent persisted snapshots, and dedicated orderbook snapshot history is now persisted, while full unthrottled ladder persistence is still pending.
 - Strategy registry, baseline strategies, and microstructure strategies.
 - Backtest engine, walk-forward validation, Monte Carlo, sensitivity, Deflated Sharpe.
 - Execution engine, idempotent order placement, fill reconciliation, SL/TP manager.
 - Paper trading simulator and live-vs-backtest divergence tracker.
-- Full execution quality and cost accounting pipeline.
+- Full lot-level execution-quality and cost accounting pipeline.
 - AI Analyst OpenRouter integration and suggestion approval workflow.
 - Recovery service and dead-man switch.
 - Full production deployment hardening, backups, Nginx TLS, and disaster recovery drills.
@@ -81,4 +84,4 @@ This tracks AIQ-BOT v2.1 blueprint coverage as of Phase 1 foundation.
 
 ## Next Blueprint Gate
 
-Phase 1 now includes Binance REST/WebSocket ingestion, futures context polling, in-memory orderbook reconstruction, historical orderbook snapshot storage, strategy/risk/execution foundations, venue-native user-stream reconciliation, synced balances and positions, partial-fill dedupe, mark-to-market PnL, cancel/replace lifecycle, journal-grade fill ledger, strategy-attributed journal and execution-quality reads, dashboard/operator exports, scheduled digest reporting, digest anomaly scoring, persisted digest run logs, and digest trend analytics in the dashboard. The next blueprint gate is execution hardening and operator analytics deepening: richer digest statistics, more complete venue execution control, stronger lot-level accounting, and then the research/validation pipeline.
+Phase 1 now includes Bybit REST/WebSocket ingestion, futures-context polling, in-memory orderbook reconstruction, historical orderbook snapshot storage, strategy/risk/execution foundations, venue-native private-stream reconciliation, synced balances and positions, partial-fill dedupe, mark-to-market PnL, cancel/replace lifecycle, journal-grade fill ledger, strategy-attributed journal and execution-quality reads, venue diagnostics, first-pass execution-cost analytics, dashboard/operator exports, scheduled digest reporting, digest anomaly scoring, persisted digest run logs, and digest trend analytics in the dashboard. The next blueprint gate is execution hardening and accounting depth: richer Bybit venue control, stronger lot-level close accounting, and then the research/validation pipeline.

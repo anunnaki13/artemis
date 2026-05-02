@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AIQ-BOT",
-  description: "AI-Quant Binance Bot"
+  description: "AI-Quant Bybit Bot"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -14,4 +14,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

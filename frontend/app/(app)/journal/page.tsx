@@ -52,6 +52,17 @@ function formatTime(value: string) {
   });
 }
 
+function formatBps(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "--";
+  }
+  return `${parsed.toFixed(2)} bps`;
+}
+
 function startOfDayUtc(value: string) {
   return value ? `${value}T00:00:00.000Z` : undefined;
 }
@@ -295,7 +306,7 @@ export default function JournalPage() {
         </div>
       </Panel>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <Panel title="Realized PnL">
           <div className={`text-2xl font-semibold ${Number(summary?.gross_realized_pnl_usd ?? 0) >= 0 ? "text-profit" : "text-loss"}`}>
             ${formatNumber(summary?.gross_realized_pnl_usd)}
@@ -313,6 +324,12 @@ export default function JournalPage() {
         <Panel title="Average Fill">
           <div className="text-2xl font-semibold">${formatNumber(summary?.average_fill_notional_usd)}</div>
           <div className="mt-2 font-mono text-[11px] text-muted">Avg realized ${formatNumber(summary?.average_realized_pnl_per_fill_usd)}</div>
+        </Panel>
+        <Panel title="Execution Cost">
+          <div className={`text-2xl font-semibold ${Number(summary?.gross_adverse_slippage_cost_usd ?? 0) > 0 ? "text-warning" : "text-secondary"}`}>
+            ${formatNumber(summary?.gross_adverse_slippage_cost_usd)}
+          </div>
+          <div className="mt-2 font-mono text-[11px] text-muted">Avg adverse {formatBps(summary?.average_adverse_slippage_bps)}</div>
         </Panel>
       </div>
 
@@ -405,6 +422,7 @@ export default function JournalPage() {
                 <th className="pb-2">Statuses</th>
                 <th className="pb-2">Fill Ratio</th>
                 <th className="pb-2">Slippage</th>
+                <th className="pb-2">Cost</th>
                 <th className="pb-2">Realized</th>
               </tr>
             </thead>
@@ -421,7 +439,14 @@ export default function JournalPage() {
                   <td className="py-2 font-mono text-[11px] text-muted">{lineage.lineage_statuses.join(" -> ")}</td>
                   <td className="py-2">{formatNumber(Number(lineage.fill_ratio) * 100, 1)}%</td>
                   <td className={`py-2 ${Number(lineage.slippage_bps ?? 0) <= 0 ? "text-profit" : "text-warning"}`}>
-                    {formatNumber(lineage.slippage_bps, 2)} bps
+                    <div>{formatBps(lineage.slippage_bps)}</div>
+                    <div className="font-mono text-[11px] text-muted">adv {formatBps(lineage.adverse_slippage_bps)}</div>
+                  </td>
+                  <td className="py-2">
+                    <div className={Number(lineage.slippage_cost_usd) > 0 ? "text-warning" : "text-secondary"}>
+                      ${formatNumber(lineage.slippage_cost_usd)}
+                    </div>
+                    <div className="font-mono text-[11px] text-muted">under ${formatNumber(lineage.underfill_notional_usd)}</div>
                   </td>
                   <td className={`py-2 ${Number(lineage.realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"}`}>
                     ${formatNumber(lineage.realized_pnl_usd)}
@@ -430,7 +455,7 @@ export default function JournalPage() {
               ))}
               {filteredLineages.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-4 text-center text-muted">
+                  <td colSpan={7} className="py-4 text-center text-muted">
                     No replacement lineages recorded yet.
                   </td>
                 </tr>

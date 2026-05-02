@@ -11,16 +11,15 @@ from websockets import connect
 
 from app.config import get_settings
 from app.models import Candle, MarketSnapshot, OrderBookSnapshot
-from services.market_data.binance import (
-    BinanceMarketDataClient,
-    build_combined_stream_url,
+from services.market_data.bybit import (
+    BybitMarketDataClient,
     millis_to_datetime,
     parse_funding_snapshot,
-    parse_ws_book_ticker_message,
+    parse_open_interest_snapshot,
     parse_ws_depth_message,
     parse_ws_kline_message,
-    parse_ws_mini_ticker_message,
-    parse_open_interest_snapshot,
+    parse_ws_ticker_message,
+    topic_for_symbol,
 )
 from services.market_data.orderbook import OrderBookState
 from services.market_data.orderbook import levels_to_payload, metrics_to_payload
@@ -38,18 +37,19 @@ class StreamStatus:
     last_error: str | None = None
 
 
-class BinanceMarketStreamService:
+class BybitMarketStreamService:
     def __init__(
         self,
         session_factory: async_sessionmaker[Any],
-        ws_base_url: str | None = None,
-        futures_api_base_url: str | None = None,
+        ws_public_spot_base_url: str | None = None,
         poll_interval_seconds: int | None = None,
     ) -> None:
         settings = get_settings()
         self.session_factory = session_factory
-        self.ws_base_url = (ws_base_url or settings.binance_ws_base_url).rstrip("/")
-        self.client = BinanceMarketDataClient(futures_base_url=futures_api_base_url)
+        self.ws_public_spot_base_url = (
+            ws_public_spot_base_url or settings.bybit_ws_public_spot_base_url
+        ).rstrip("/")
+        self.client = BybitMarketDataClient()
         self.poll_interval_seconds = poll_interval_seconds or settings.market_data_poll_interval_seconds
         self._status = StreamStatus()
         self._task: asyncio.Task[None] | None = None
@@ -64,7 +64,6 @@ class BinanceMarketStreamService:
         normalized_symbols = sorted({symbol.upper() for symbol in symbols if symbol.strip()})
         if not normalized_symbols:
             raise ValueError("at least one symbol is required")
-
         async with self._lock:
             await self._stop_locked()
             self._stop_event = asyncio.Event()
@@ -114,10 +113,14 @@ class BinanceMarketStreamService:
             self._status.running = False
 
     async def _run_ws_forever(self, symbols: list[str], interval: str) -> None:
-        url = build_combined_stream_url(self.ws_base_url, symbols, interval)
+        topics: list[str] = []
+        for symbol in symbols:
+            topics.extend(topic_for_symbol(symbol, interval))
+        subscribe_payload = {"op": "subscribe", "args": topics}
         while not self._stop_event.is_set():
             try:
-                async with connect(url, ping_interval=20, ping_timeout=20) as websocket:
+                async with connect(self.ws_public_spot_base_url, ping_interval=20, ping_timeout=20) as websocket:
+                    await websocket.send(json.dumps(subscribe_payload))
                     self._status.running = True
                     self._status.last_error = None
                     while not self._stop_event.is_set():
@@ -134,36 +137,25 @@ class BinanceMarketStreamService:
                 await asyncio.sleep(min(self._status.reconnect_attempts, 5))
 
     async def _run_funding_poll_forever(self, symbols: list[str]) -> None:
-        target_symbols = set(symbols)
         while not self._stop_event.is_set():
             try:
-                premium_index_payloads = await self.client.premium_index()
-                premium_by_symbol = {
-                    str(item.get("symbol", "")).upper(): item
-                    for item in premium_index_payloads
-                    if str(item.get("symbol", "")).upper() in target_symbols
-                }
-
                 async with self.session_factory() as session:
                     for symbol in symbols:
-                        premium_payload = premium_by_symbol.get(symbol)
-                        if premium_payload is None:
-                            continue
-                        merged_values = parse_funding_snapshot(premium_payload)
+                        funding_payload = await self.client.funding_ticker(symbol)
+                        merged_values = parse_funding_snapshot(funding_payload)
                         try:
                             open_interest_payload = await self.client.open_interest(symbol)
                             merged_values["open_interest"] = parse_open_interest_snapshot(
-                                open_interest_payload
+                                symbol, open_interest_payload
                             )["open_interest"]
                             merged_values["payload"] = {
-                                "premium_index": premium_payload,
+                                "funding_ticker": funding_payload,
                                 "open_interest": open_interest_payload,
                             }
                         except Exception:
-                            merged_values["payload"] = {"premium_index": premium_payload}
+                            merged_values["payload"] = {"funding_ticker": funding_payload}
                         await session.execute(insert(MarketSnapshot).values(**merged_values))
                     await session.commit()
-
                 self._status.poll_cycles += 1
                 self._status.last_message_at = datetime.now(tz=timezone.utc)
                 self._status.last_error = None
@@ -181,19 +173,10 @@ class BinanceMarketStreamService:
         payload = json.loads(raw_message)
         if not isinstance(payload, dict):
             return
-        data = payload.get("data", payload)
-        if not isinstance(data, dict):
-            return
-
-        stream_name = str(payload.get("stream", "")).lower()
-        event_type = str(data.get("e", "")).lower()
-        if event_type == "depthupdate" or "@depth@" in stream_name:
-            await self._apply_depth_update(data)
-        snapshot_values = self._snapshot_values(stream_name, event_type, data)
-        candle_values = parse_ws_kline_message(data) if event_type == "kline" else None
-
-        async with self.session_factory() as session:
-            if candle_values is not None:
+        topic = str(payload.get("topic", ""))
+        if topic.startswith("kline."):
+            candle_values = parse_ws_kline_message(topic, payload)
+            async with self.session_factory() as session:
                 statement = insert(Candle).values(**candle_values)
                 await session.execute(
                     statement.on_conflict_do_update(
@@ -201,106 +184,85 @@ class BinanceMarketStreamService:
                         set_=candle_values,
                     )
                 )
-            if snapshot_values is not None:
+                await session.commit()
+        elif topic.startswith("tickers."):
+            snapshot_values = parse_ws_ticker_message(payload)
+            async with self.session_factory() as session:
                 await session.execute(insert(MarketSnapshot).values(**snapshot_values))
-            if event_type == "depthupdate" or "@depth@" in stream_name:
-                orderbook = self._orderbooks.get(str(data["s"]).upper())
+                await session.commit()
+        elif topic.startswith("orderbook."):
+            symbol = topic.split(".")[-1].upper()
+            await self._apply_depth_update(symbol, payload)
+            async with self.session_factory() as session:
+                depth_snapshot = parse_ws_depth_message(symbol, payload)
+                orderbook = self._orderbooks.get(symbol)
+                if orderbook is not None:
+                    metrics = orderbook.metrics()
+                    depth_snapshot["payload"] = {
+                        "depth_update": payload,
+                        "metrics": metrics_to_payload(metrics),
+                    }
+                await session.execute(insert(MarketSnapshot).values(**depth_snapshot))
                 if orderbook is not None:
                     orderbook_snapshot = self._build_orderbook_snapshot(orderbook)
                     if orderbook_snapshot is not None:
                         await session.execute(insert(OrderBookSnapshot).values(**orderbook_snapshot))
-            await session.commit()
-
+                await session.commit()
         self._status.messages_processed += 1
         self._status.last_message_at = datetime.now(tz=timezone.utc)
 
-    def _snapshot_values(
-        self,
-        stream_name: str,
-        event_type: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        if event_type == "24hrminiticker" or stream_name.endswith("@miniticker"):
-            return parse_ws_mini_ticker_message(payload)
-        if event_type == "bookticker" or stream_name.endswith("@bookticker"):
-            book_payload = dict(payload)
-            if "E" not in book_payload and "T" not in book_payload:
-                book_payload["E"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-            return parse_ws_book_ticker_message(book_payload)
-        if event_type == "depthupdate" or "@depth@" in stream_name:
-            depth_snapshot = parse_ws_depth_message(payload)
-            symbol = str(payload["s"]).upper()
-            orderbook = self._orderbooks.get(symbol)
-            if orderbook is not None:
-                metrics = orderbook.metrics()
-                depth_snapshot["payload"] = {
-                    "depth_update": payload,
-                    "metrics": metrics_to_payload(metrics),
-                }
-            return depth_snapshot
-        return None
-
     async def _bootstrap_orderbooks(self, symbols: list[str]) -> None:
         for symbol in symbols:
-            await self._bootstrap_orderbook_symbol(symbol)
-
-    async def _bootstrap_orderbook_symbol(self, symbol: str) -> None:
-        snapshot = await self.client.orderbook(symbol)
-        bids = snapshot.get("bids", [])
-        asks = snapshot.get("asks", [])
-        last_update_id = snapshot.get("lastUpdateId")
-        if not isinstance(bids, list) or not isinstance(asks, list) or not isinstance(last_update_id, int):
-            raise ValueError(f"unexpected orderbook snapshot payload for {symbol}")
-        orderbook = OrderBookState(symbol=symbol)
-        orderbook.load_snapshot(
-            bids=bids,
-            asks=asks,
-            last_update_id=last_update_id,
-            updated_at=datetime.now(tz=timezone.utc),
-        )
-        self._orderbooks[symbol] = orderbook
-        self._last_persisted_at.pop(symbol, None)
-
-    async def _apply_depth_update(self, payload: dict[str, Any]) -> None:
-        symbol = str(payload["s"]).upper()
-        orderbook = self._orderbooks.get(symbol)
-        if orderbook is None:
-            return
-        first_update_id = int(payload["U"])
-        final_update_id = int(payload["u"])
-        bids = payload.get("b", [])
-        asks = payload.get("a", [])
-        if not isinstance(bids, list) or not isinstance(asks, list):
-            raise ValueError("unexpected depth update payload")
-        try:
-            orderbook.apply_depth_update(
-                first_update_id=first_update_id,
-                final_update_id=final_update_id,
+            snapshot = await self.client.orderbook(symbol)
+            bids = snapshot.get("b", [])
+            asks = snapshot.get("a", [])
+            last_update_id = int(snapshot.get("u", 0))
+            orderbook = OrderBookState(symbol=symbol)
+            orderbook.load_snapshot(
                 bids=bids,
                 asks=asks,
-                updated_at=millis_to_datetime(int(payload["E"])),
+                last_update_id=last_update_id,
+                updated_at=millis_to_datetime(int(snapshot.get("ts", int(datetime.now(tz=timezone.utc).timestamp() * 1000)))),
             )
-        except ValueError:
-            await self._bootstrap_orderbook_symbol(symbol)
+            self._orderbooks[symbol] = orderbook
+
+    async def _apply_depth_update(self, symbol: str, payload: dict[str, Any]) -> None:
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return
+        orderbook = self._orderbooks.get(symbol)
+        if orderbook is None:
+            await self._bootstrap_orderbooks([symbol])
+            orderbook = self._orderbooks.get(symbol)
+            if orderbook is None:
+                return
+        update_id = int(data.get("u", 0))
+        bids = data.get("b", [])
+        asks = data.get("a", [])
+        orderbook.apply_depth_update(
+            bids=bids if isinstance(bids, list) else [],
+            asks=asks if isinstance(asks, list) else [],
+            first_update_id=update_id,
+            final_update_id=update_id,
+            updated_at=millis_to_datetime(int(payload.get("ts", int(datetime.now(tz=timezone.utc).timestamp() * 1000)))),
+        )
 
     def _build_orderbook_snapshot(self, orderbook: OrderBookState) -> dict[str, Any] | None:
-        if orderbook.updated_at is None:
-            return None
+        now = datetime.now(tz=timezone.utc)
         last_persisted_at = self._last_persisted_at.get(orderbook.symbol)
-        interval_seconds = max(self.orderbook_persist_interval_seconds, 1)
-        if last_persisted_at is not None:
-            elapsed = (orderbook.updated_at - last_persisted_at).total_seconds()
-            if elapsed < interval_seconds:
-                return None
-        top_bids = orderbook.top_bids(self.orderbook_snapshot_depth_levels)
-        top_asks = orderbook.top_asks(self.orderbook_snapshot_depth_levels)
+        if (
+            last_persisted_at is not None
+            and (now - last_persisted_at).total_seconds() < self.orderbook_persist_interval_seconds
+        ):
+            return None
         metrics = orderbook.metrics()
-        self._last_persisted_at[orderbook.symbol] = orderbook.updated_at
+        bids = orderbook.top_bids(self.orderbook_snapshot_depth_levels)
+        asks = orderbook.top_asks(self.orderbook_snapshot_depth_levels)
+        self._last_persisted_at[orderbook.symbol] = now
         return {
             "symbol": orderbook.symbol,
-            "timestamp": orderbook.updated_at,
-            "last_update_id": orderbook.last_update_id,
-            "bids": levels_to_payload(top_bids),
-            "asks": levels_to_payload(top_asks),
+            "timestamp": metrics.updated_at or now,
+            "bids": levels_to_payload(bids),
+            "asks": levels_to_payload(asks),
             "metrics": metrics_to_payload(metrics),
         }

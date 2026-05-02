@@ -134,6 +134,12 @@ class DailyDigestService:
             writer.writerow(headers)
             writer.writerows(rows)
 
+    def load_snapshot(self, report_date: date) -> dict[str, object]:
+        path = self.output_dir / report_date.isoformat() / "summary.json"
+        if not path.exists():
+            raise FileNotFoundError(path)
+        return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
+
     def _build_digest_message(self, artifact: DailyDigestArtifact, snapshot: dict[str, object]) -> str:
         summary = self._summarize_snapshot(snapshot)
         top_strategy_line = "top_strategy: n/a"

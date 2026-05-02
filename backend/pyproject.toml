@@ -1,7 +1,7 @@
 [project]
 name = "aiq-bot-backend"
 version = "0.1.0"
-description = "AI-Quant Binance Bot backend"
+description = "AI-Quant Bybit Bot backend"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13.2",

@@ -7,10 +7,10 @@ from services.market_data.orderbook import (
     metrics_from_payload,
     metrics_to_payload,
 )
-from services.market_data.streaming import BinanceMarketStreamService, StreamStatus
+from services.market_data.bybit_streaming import BybitMarketStreamService, StreamStatus
 
 __all__ = [
-    "BinanceMarketStreamService",
+    "BybitMarketStreamService",
     "OrderBookLevel",
     "OrderBookMetrics",
     "OrderBookState",

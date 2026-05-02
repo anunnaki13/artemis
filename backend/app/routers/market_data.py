@@ -23,12 +23,12 @@ from app.schemas.market_data import (
     SymbolRead,
     SyncSymbolsResponse,
 )
-from services.market_data.binance import BinanceMarketDataClient, extract_symbol_filters, parse_kline
+from services.market_data.bybit import BybitMarketDataClient, extract_symbol_filters, parse_kline
 from services.market_data.orderbook import levels_from_payload, metrics_from_payload
-from services.market_data.streaming import BinanceMarketStreamService
+from services.market_data.bybit_streaming import BybitMarketStreamService
 
 router = APIRouter(prefix="/market-data", tags=["market-data"])
-stream_service = BinanceMarketStreamService(session_factory=AsyncSessionLocal)
+stream_service = BybitMarketStreamService(session_factory=AsyncSessionLocal)
 
 
 def build_orderbook_metrics_response(metrics: Any) -> OrderBookMetricsResponse:
@@ -77,22 +77,22 @@ async def sync_symbols(
     limit: int = Query(default=500, ge=1, le=2000),
     session: AsyncSession = Depends(get_session),
 ) -> SyncSymbolsResponse:
-    client = BinanceMarketDataClient()
-    payload = await client.exchange_info()
+    client = BybitMarketDataClient()
+    payload = await client.instruments_info(category="spot", limit=limit)
     symbols = [
         item
-        for item in payload.get("symbols", [])
+        for item in payload.get("result", {}).get("list", [])
         if isinstance(item, dict)
-        and item.get("status") == "TRADING"
-        and (quote_asset is None or item.get("quoteAsset") == quote_asset.upper())
+        and item.get("status") == "Trading"
+        and (quote_asset is None or item.get("quoteCoin") == quote_asset.upper())
     ][:limit]
 
     for item in symbols:
         filters = extract_symbol_filters(item)
         values: dict[str, Any] = {
             "symbol": item["symbol"],
-            "base_asset": item["baseAsset"],
-            "quote_asset": item["quoteAsset"],
+            "base_asset": item["baseCoin"],
+            "quote_asset": item["quoteCoin"],
             "market_type": "spot",
             "status": item["status"],
             "is_enabled": True,
@@ -114,8 +114,8 @@ async def ingest_candles(
     payload: CandleIngestRequest,
     session: AsyncSession = Depends(get_session),
 ) -> CandleIngestResponse:
-    client = BinanceMarketDataClient()
-    klines = await client.klines(payload.symbol, payload.interval, payload.limit)
+    client = BybitMarketDataClient()
+    klines = await client.klines(payload.symbol, payload.interval, payload.limit, category="spot")
     for kline in klines:
         values = parse_kline(payload.symbol, payload.interval, kline)
         statement = insert(Candle).values(**values)

@@ -10,20 +10,24 @@ This maps the v2 blueprint credentials that must be configured before paper/live
 | Owner password | Yes | Web UI login | Hash with Argon2id only. Never store plaintext. |
 | TOTP secret/code | Yes | Mandatory 2FA | Show provisioning URI/QR during setup only. |
 
-## Binance
+## Bybit
 
 | Field | Required | Used For | Notes |
 |---|---:|---|---|
-| `BINANCE_API_KEY` | Yes for paper/live | Exchange account/trading API | Must be trade-only. |
-| `BINANCE_API_SECRET` | Yes for paper/live | Request signing | Never display full value after save. |
-| `BINANCE_TESTNET` | Yes | Paper/test environment switch | `true` for testnet workflows. |
-| `BINANCE_VIP_TIER` | Yes | Fee model and net PnL | Default `0`. |
-| `BINANCE_WHITELISTED_IP` | Yes before live | Binance IP whitelist | Current VPS IP: `103.150.197.225`. |
+| `BYBIT_API_KEY` | Yes for paper/live | Exchange account/trading API | Must be trade-only. |
+| `BYBIT_API_SECRET` | Yes for paper/live | Request signing | Never display full value after save. |
+| `BYBIT_TESTNET` | Yes | Paper/test environment switch | `true` for testnet workflows. |
+| `BYBIT_API_BASE_URL` | Optional | Override mainnet/testnet API endpoint | Leave empty unless routing through a custom endpoint. |
+| `BYBIT_ACCOUNT_TYPE` | Yes | Venue account mode | Use `UNIFIED`. |
+| `BYBIT_WITHDRAWAL_ENABLED` | Yes before live | Operator safety acknowledgement | Must remain `false`. |
+| `BYBIT_VIP_TIER` | Yes | Fee model and net PnL | Default `0`. |
+| `BYBIT_WHITELISTED_IP` | Yes before live | Bybit IP whitelist | Current VPS IP: `103.150.197.225`. |
 
 Hard rules from blueprint:
 
 - Withdrawal permission must be disabled.
 - IP restriction must be enabled.
+- Unified Trading Account should be enabled.
 - Bot should refuse startup if withdrawal is enabled or IP restriction is missing.
 
 ## AI / OpenRouter

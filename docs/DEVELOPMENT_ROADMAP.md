@@ -6,7 +6,7 @@ This document separates three views of the system:
 2. what is currently operational
 3. what should be developed next, in order
 
-Date baseline: `2026-05-01`
+Date baseline: `2026-05-02`
 
 ## 1. Delivered So Far
 
@@ -29,13 +29,12 @@ Date baseline: `2026-05-01`
 
 ### Market data and microstructure
 
-- Binance Spot symbol sync and candle ingestion.
-- Binance combined WebSocket streaming for:
+- Bybit Spot symbol sync and candle ingestion.
+- Bybit public WebSocket streaming for:
   - kline
-  - mini-ticker
-  - book-ticker
+  - ticker
   - depth deltas
-- Binance Futures polling for:
+- Bybit linear polling for:
   - funding rate
   - open interest
 - In-memory orderbook reconstruction with gap recovery and REST rebootstrap.
@@ -77,8 +76,8 @@ Date baseline: `2026-05-01`
   - fail stale
   - reconcile
 - Stable execution adapter contract.
-- Paper adapter and Binance adapter scaffolding.
-- Runtime-gated authenticated Binance execution transport.
+- Paper adapter and Bybit adapter scaffolding.
+- Runtime-gated authenticated Bybit execution transport.
 - Cancel flow for `dispatching` intents.
 - Replace flow for `queued` / `approved` intents.
 - Order-id-based reconciliation.
@@ -86,7 +85,7 @@ Date baseline: `2026-05-01`
 
 ### Venue account state
 
-- Binance user-stream consumer for authenticated execution/account events.
+- Bybit private-stream consumer for authenticated execution/account events.
 - Synced spot balances.
 - Synced spot symbol positions.
 - Partial-fill dedupe using cumulative order-fill state.
@@ -102,6 +101,10 @@ Date baseline: `2026-05-01`
 - Fill summary and chain summary reads.
 - Lineage outcome reads for replacement chains.
 - Per-strategy outcome summaries.
+- Execution-cost analytics:
+  - adverse slippage bps
+  - adverse slippage cost
+  - underfill notional
 - Frontend Journal and Execution Quality pages now consume live backend data instead of placeholders.
 
 ### Reporting and operator tooling
@@ -127,6 +130,7 @@ Date baseline: `2026-05-01`
   - anomaly vs fills
   - anomaly vs lineage alerts
   - anomaly vs top-strategy pnl
+- Venue diagnostics for Bybit execution events with dashboard summary and CSV export.
 
 ## 2. Current Operational Surface
 
@@ -172,7 +176,7 @@ This is the implementation sequence that has already been delivered.
 9. execution intent queue
 10. worker lifecycle and reconciliation
 11. adapter contract and order identifiers
-12. runtime Binance transport gating
+12. runtime Bybit transport gating
 13. venue user-stream consumer
 14. synced balances and positions
 15. partial-fill dedupe and mark-to-market pnl
@@ -184,6 +188,8 @@ This is the implementation sequence that has already been delivered.
 21. digest anomaly scoring
 22. persisted digest run logs
 23. digest trend series and comparison mode
+24. Bybit runtime cutover and safety gating
+25. venue diagnostics and execution-cost analytics
 
 ## 4. Next Development Queue
 
@@ -191,64 +197,54 @@ The next steps below are ordered by leverage, not by novelty.
 
 ### Near-term priority
 
-1. Digest comparison statistics
-   - average anomaly score in selected range
-   - average fills per digest
-   - flagged-days count
-   - worst top-strategy pnl
+1. Venue review surface
+   - dedicated `Venue Events` page
+   - richer filters for status bucket, venue error code, and reconcile state
+   - linkage from venue diagnostics into journal/outcome review
 
-2. Digest trend filters beyond presets
-   - custom date range
-   - anomaly-only filter
-   - positive/negative pnl filter
-
-3. Run-log export expansion
-   - include anomaly flags as separate columns
-   - include digest artifact availability status
-
-### Execution and trading-core hardening
-
-4. Real venue execution completion
-   - production-grade Binance order transport
-   - richer venue error mapping
-   - partial fill and cancel reconciliation depth
-
-5. Position and pnl accounting hardening
+2. Lot-level accounting hardening
    - close-lot accounting
    - multi-order close attribution
    - stronger realized pnl audit trail
 
-6. Strategy registry expansion
+3. Bybit live execution hardening
+   - richer venue error mapping
+   - deeper partial-fill and cancel reconciliation
+   - safer retry/idempotency behavior
+
+### Execution and trading-core hardening
+
+4. Strategy registry expansion
    - multiple baseline strategies
    - parameterized strategy config registry
    - strategy enable/disable controls
 
 ### Research and validation
 
-7. Backtest engine implementation
-8. walk-forward and Monte Carlo validation
-9. sensitivity analysis and Deflated Sharpe
-10. live-vs-research divergence reporting
+5. Backtest engine implementation
+6. walk-forward and Monte Carlo validation
+7. sensitivity analysis and Deflated Sharpe
+8. live-vs-research divergence reporting
 
 ### Ops and resilience
 
-11. dead-man switch
-12. heartbeat and repeated critical alerts
-13. recovery workflows and replay tooling
-14. backup and restore verification
+9. dead-man switch
+10. heartbeat and repeated critical alerts
+11. recovery workflows and replay tooling
+12. backup and restore verification
 
 ### Product and AI layer
 
-15. AI Analyst backend integration
-16. approval workflow for AI suggestions
+13. AI Analyst backend integration
+14. approval workflow for AI suggestions
 17. operator review surfaces for AI-generated recommendations
 
 ## 5. Recommended Build Order From Here
 
 If development continues without changing direction, the most efficient sequence is:
 
-1. finish digest/operator analytics
-2. complete execution hardening
+1. finish the Bybit migration cleanup using [BINANCE-TO-BYBIT-MIGRATION.md](/home/damnation/trade/BINANCE-TO-BYBIT-MIGRATION.md:1) as the venue cutover checklist
+2. finish digest/operator analytics
 3. deepen accounting and pnl correctness
 4. expand strategy set
 5. build research pipeline

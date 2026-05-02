@@ -319,6 +319,10 @@ def test_summarize_intent_outcomes_links_realized_result_to_signal_intent() -> N
     assert executed.average_fill_price == Decimal("65333.33333333333333333333333")
     assert executed.slippage_bps is not None
     assert executed.slippage_bps.quantize(Decimal("0.0001")) == Decimal("51.2821")
+    assert executed.adverse_slippage_bps is not None
+    assert executed.adverse_slippage_bps.quantize(Decimal("0.0001")) == Decimal("51.2821")
+    assert executed.slippage_cost_usd.quantize(Decimal("0.0001")) == Decimal("5.0000")
+    assert executed.underfill_notional_usd == Decimal("20")
 
 
 def test_summarize_intent_lineage_outcomes_rolls_replacements_into_root_chain() -> None:
@@ -389,3 +393,7 @@ def test_summarize_intent_lineage_outcomes_rolls_replacements_into_root_chain() 
     assert lineage.filled_quote_quantity == Decimal("910")
     assert lineage.realized_pnl_usd == Decimal("14")
     assert lineage.fill_ratio.quantize(Decimal("0.0001")) == Decimal("1.0111")
+    assert lineage.adverse_slippage_bps is not None
+    assert lineage.adverse_slippage_bps.quantize(Decimal("0.0001")) == Decimal("30.8642")
+    assert lineage.slippage_cost_usd.quantize(Decimal("0.0001")) == Decimal("1.6000")
+    assert lineage.underfill_notional_usd == Decimal("0")

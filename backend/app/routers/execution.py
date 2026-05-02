@@ -12,12 +12,12 @@ from app.config import get_settings
 from app.db import get_session
 from app.db import AsyncSessionLocal
 from app.deps import get_current_user
-from app.models import ExecutionIntent, User
+from app.models import ExecutionIntent, ExecutionVenueEvent, User
 from app.models import SpotAccountBalance, SpotExecutionFill, SpotSymbolPosition
 from app.routers.risk import resolve_live_spot_exposure
 from app.schemas.execution import (
-    BinanceExecutionPreviewResponse,
-    BinanceUserStreamStatusResponse,
+    BybitExecutionPreviewResponse,
+    BybitUserStreamStatusResponse,
     ExecutionIntentCancelRequest,
     ExecutionDispatchResponse,
     ExecutionIntentLineageOutcomeRead,
@@ -33,22 +33,24 @@ from app.schemas.execution import (
     ExecutionTimeoutSweepResponse,
     ExecutionVenueEventIngestRequest,
     ExecutionVenueEventIngestResponse,
+    ExecutionVenueEventRead,
     SpotAccountBalanceRead,
     SpotExecutionFillChainRead,
     SpotExecutionFillRead,
     SpotExecutionFillSummaryRead,
     SpotSymbolPositionRead,
     VenueEventState,
+    VenueStatusBucket,
 )
 from app.schemas.risk import SignalRiskEvaluateResponse
 from services.execution.adapter import (
-    BinanceAuthenticatedExecutionTransport,
-    BinanceExecutionAdapter,
+    BybitAuthenticatedExecutionTransport,
+    BybitExecutionAdapter,
     PaperExecutionAdapter,
-    StubBinanceExecutionTransport,
+    StubBybitExecutionTransport,
 )
 from services.execution.account_state import SpotAccountStateService
-from services.execution.binance_runtime import resolve_binance_execution_runtime
+from services.execution.bybit_runtime import ensure_bybit_runtime_ready, resolve_bybit_execution_runtime
 from services.execution.fill_analytics import (
     IntentLineageOutcomeSummary,
     summarize_fill_chains,
@@ -58,14 +60,14 @@ from services.execution.fill_analytics import (
     summarize_strategy_quality,
 )
 from services.execution.intent_queue import ExecutionIntentQueueService
-from services.execution.user_stream import BinanceUserStreamService
+from services.execution.bybit_user_stream import BybitUserStreamService
 from services.execution.worker import ExecutionWorkerService
 from services.risk.capital_profile import CapitalProfileManager
 from services.risk.signal_gate import SignalRiskGate, SignalRiskInput
 
 router = APIRouter(prefix="/execution", tags=["execution"])
 intent_queue_service = ExecutionIntentQueueService()
-user_stream_service = BinanceUserStreamService(
+user_stream_service = BybitUserStreamService(
     session_factory=AsyncSessionLocal,
     queue_service=intent_queue_service,
 )
@@ -117,6 +119,28 @@ def filter_lineage_rows(
     return filtered
 
 
+def filter_venue_event_rows(
+    events: list[ExecutionVenueEvent],
+    *,
+    venue: str | None,
+    reconcile_state: VenueEventState | None,
+    status_bucket: VenueStatusBucket | None,
+    queue_service: ExecutionIntentQueueService,
+) -> list[ExecutionVenueEvent]:
+    filtered = events
+    if venue is not None:
+        filtered = [event for event in filtered if event.venue == venue]
+    if reconcile_state is not None:
+        filtered = [event for event in filtered if event.reconcile_state == reconcile_state]
+    if status_bucket is not None:
+        filtered = [
+            event
+            for event in filtered
+            if queue_service.classify_venue_status(event.venue_status) == status_bucket
+        ]
+    return filtered
+
+
 def csv_response(filename: str, headers: list[str], rows: list[list[object]]) -> StreamingResponse:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -128,6 +152,32 @@ def csv_response(filename: str, headers: list[str], rows: list[list[object]]) ->
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def venue_events_csv_rows(
+    events: list[ExecutionVenueEvent],
+    queue_service: ExecutionIntentQueueService,
+) -> list[list[object]]:
+    rows: list[list[object]] = []
+    for event in events:
+        event_read = queue_service.to_venue_event_read(event)
+        rows.append(
+            [
+                event_read.id,
+                event_read.created_at.isoformat(),
+                event_read.venue,
+                event_read.event_type,
+                event_read.venue_status,
+                event_read.status_bucket,
+                event_read.reconcile_state,
+                event_read.symbol,
+                event_read.client_order_id,
+                event_read.venue_order_id,
+                event_read.ret_code,
+                event_read.ret_msg,
+            ]
+        )
+    return rows
 
 
 async def evaluate_signal_risk(
@@ -179,17 +229,18 @@ async def evaluate_signal_risk(
 async def build_execution_worker(session: AsyncSession) -> ExecutionWorkerService:
     settings = get_settings()
     if settings.mode in {"live_micro", "live_scaled"}:
-        runtime = await resolve_binance_execution_runtime(session)
+        runtime = await resolve_bybit_execution_runtime(session)
         if runtime.live_transport_enabled:
-            adapter = BinanceExecutionAdapter(
-                transport=BinanceAuthenticatedExecutionTransport(
+            runtime = await ensure_bybit_runtime_ready(session, runtime)
+            adapter = BybitExecutionAdapter(
+                transport=BybitAuthenticatedExecutionTransport(
                     api_key=runtime.api_key,
                     api_secret=runtime.api_secret,
                     base_url=runtime.base_url,
                 )
             )
         else:
-            adapter = BinanceExecutionAdapter(transport=StubBinanceExecutionTransport())
+            adapter = BybitExecutionAdapter(transport=StubBybitExecutionTransport())
         return ExecutionWorkerService(intent_queue_service, adapter=adapter)
     return ExecutionWorkerService(intent_queue_service, adapter=PaperExecutionAdapter())
 
@@ -319,41 +370,45 @@ async def get_execution_intent_by_order_id(
     return intent_queue_service.to_read(intent)
 
 
-@router.get("/venues/binance/intents/{intent_id}/preview-order", response_model=BinanceExecutionPreviewResponse)
-async def preview_binance_order_request(
+@router.get("/venues/bybit/intents/{intent_id}/preview-order", response_model=BybitExecutionPreviewResponse)
+async def preview_bybit_order_request(
     intent_id: int,
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> BinanceExecutionPreviewResponse:
+) -> BybitExecutionPreviewResponse:
     intent = await session.get(ExecutionIntent, intent_id)
     if intent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="execution intent not found")
     try:
-        runtime = await resolve_binance_execution_runtime(session)
+        runtime = await resolve_bybit_execution_runtime(session)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if runtime.live_transport_enabled:
+        try:
+            runtime = await ensure_bybit_runtime_ready(session, runtime)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    adapter = BinanceExecutionAdapter()
+    adapter = BybitExecutionAdapter()
     request = adapter.build_order_request(intent)
-    signed_payload = request.signed_payload(runtime.api_secret)
-    unsigned_payload = {key: value for key, value in signed_payload.items() if key != "signature"}
-    return BinanceExecutionPreviewResponse(
+    unsigned_payload = request.payload()
+    return BybitExecutionPreviewResponse(
         symbol=intent.symbol,
         side=intent.side,
         base_url=runtime.base_url,
         testnet=runtime.testnet,
         live_transport_enabled=runtime.live_transport_enabled,
         transport_mode="authenticated" if runtime.live_transport_enabled else "stub",
-        client_order_id=request.new_client_order_id,
+        client_order_id=request.order_link_id,
         unsigned_payload=unsigned_payload,
-        signed_payload_keys=sorted(signed_payload.keys()),
+        signed_payload_keys=sorted(unsigned_payload.keys()),
     )
 
 
-@router.get("/venues/binance/user-stream/status", response_model=BinanceUserStreamStatusResponse)
-async def binance_user_stream_status(_: User = Depends(get_current_user)) -> BinanceUserStreamStatusResponse:
+@router.get("/venues/bybit/user-stream/status", response_model=BybitUserStreamStatusResponse)
+async def bybit_user_stream_status(_: User = Depends(get_current_user)) -> BybitUserStreamStatusResponse:
     status_payload = user_stream_service.status()
-    return BinanceUserStreamStatusResponse(
+    return BybitUserStreamStatusResponse(
         running=status_payload.running,
         subscribed=status_payload.subscribed,
         reconnect_attempts=status_payload.reconnect_attempts,
@@ -365,12 +420,18 @@ async def binance_user_stream_status(_: User = Depends(get_current_user)) -> Bin
     )
 
 
-@router.post("/venues/binance/user-stream/start", response_model=BinanceUserStreamStatusResponse)
-async def start_binance_user_stream(
+@router.post("/venues/bybit/user-stream/start", response_model=BybitUserStreamStatusResponse)
+async def start_bybit_user_stream(
     _: User = Depends(get_current_user),
-) -> BinanceUserStreamStatusResponse:
+    session: AsyncSession = Depends(get_session),
+) -> BybitUserStreamStatusResponse:
+    try:
+        runtime = await resolve_bybit_execution_runtime(session)
+        await ensure_bybit_runtime_ready(session, runtime)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     status_payload = await user_stream_service.start()
-    return BinanceUserStreamStatusResponse(
+    return BybitUserStreamStatusResponse(
         running=status_payload.running,
         subscribed=status_payload.subscribed,
         reconnect_attempts=status_payload.reconnect_attempts,
@@ -382,10 +443,10 @@ async def start_binance_user_stream(
     )
 
 
-@router.post("/venues/binance/user-stream/stop", response_model=BinanceUserStreamStatusResponse)
-async def stop_binance_user_stream(_: User = Depends(get_current_user)) -> BinanceUserStreamStatusResponse:
+@router.post("/venues/bybit/user-stream/stop", response_model=BybitUserStreamStatusResponse)
+async def stop_bybit_user_stream(_: User = Depends(get_current_user)) -> BybitUserStreamStatusResponse:
     status_payload = await user_stream_service.stop()
-    return BinanceUserStreamStatusResponse(
+    return BybitUserStreamStatusResponse(
         running=status_payload.running,
         subscribed=status_payload.subscribed,
         reconnect_attempts=status_payload.reconnect_attempts,
@@ -619,6 +680,8 @@ async def summarize_spot_execution_fills(
         win_rate=summary.win_rate,
         average_fill_notional_usd=summary.average_fill_notional_usd,
         average_realized_pnl_per_fill_usd=summary.average_realized_pnl_per_fill_usd,
+        gross_adverse_slippage_cost_usd=summary.gross_adverse_slippage_cost_usd,
+        average_adverse_slippage_bps=summary.average_adverse_slippage_bps,
         strategy_breakdown=[
             {
                 "source_strategy": item.source_strategy,
@@ -627,6 +690,9 @@ async def summarize_spot_execution_fills(
                 "gross_notional_usd": item.gross_notional_usd,
                 "gross_realized_pnl_usd": item.gross_realized_pnl_usd,
                 "win_rate": item.win_rate,
+                "gross_adverse_slippage_cost_usd": item.gross_adverse_slippage_cost_usd,
+                "average_adverse_slippage_bps": item.average_adverse_slippage_bps,
+                "gross_underfill_notional_usd": item.gross_underfill_notional_usd,
             }
             for item in strategy_breakdown
         ],
@@ -771,6 +837,9 @@ async def list_execution_intent_outcomes(
             realized_pnl_usd=item.realized_pnl_usd,
             fill_ratio=item.fill_ratio,
             slippage_bps=item.slippage_bps,
+            adverse_slippage_bps=item.adverse_slippage_bps,
+            slippage_cost_usd=item.slippage_cost_usd,
+            underfill_notional_usd=item.underfill_notional_usd,
             last_fill_at=item.last_fill_at,
         )
         for item in summarize_intent_outcomes(intents, fills)
@@ -842,6 +911,9 @@ async def list_execution_intent_lineage_outcomes(
             realized_pnl_usd=item.realized_pnl_usd,
             fill_ratio=item.fill_ratio,
             slippage_bps=item.slippage_bps,
+            adverse_slippage_bps=item.adverse_slippage_bps,
+            slippage_cost_usd=item.slippage_cost_usd,
+            underfill_notional_usd=item.underfill_notional_usd,
             last_fill_at=item.last_fill_at,
         )
         for item in lineages
@@ -913,6 +985,9 @@ async def export_execution_intent_lineages_csv(
             "realized_pnl_usd",
             "fill_ratio",
             "slippage_bps",
+            "adverse_slippage_bps",
+            "slippage_cost_usd",
+            "underfill_notional_usd",
             "last_fill_at",
         ],
         [
@@ -935,6 +1010,9 @@ async def export_execution_intent_lineages_csv(
                 item.realized_pnl_usd,
                 item.fill_ratio,
                 item.slippage_bps,
+                item.adverse_slippage_bps,
+                item.slippage_cost_usd,
+                item.underfill_notional_usd,
                 item.last_fill_at.isoformat() if item.last_fill_at is not None else None,
             ]
             for item in lineages
@@ -1106,6 +1184,83 @@ async def ingest_execution_venue_event(
         matched=intent is not None,
         event=intent_queue_service.to_venue_event_read(event),
         intent=intent_queue_service.to_read(intent) if intent is not None else None,
+    )
+
+
+@router.get("/venues/events", response_model=list[ExecutionVenueEventRead])
+async def list_execution_venue_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    venue: str | None = Query(default=None, max_length=64),
+    reconcile_state: VenueEventState | None = Query(default=None),
+    status_bucket: VenueStatusBucket | None = Query(default=None),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[ExecutionVenueEventRead]:
+    events = list(
+        (
+            await session.scalars(
+                select(ExecutionVenueEvent)
+                .order_by(ExecutionVenueEvent.created_at.desc())
+                .limit(limit + offset)
+            )
+        ).all()
+    )
+    filtered = filter_venue_event_rows(
+        events,
+        venue=venue,
+        reconcile_state=reconcile_state,
+        status_bucket=status_bucket,
+        queue_service=intent_queue_service,
+    )
+    page = filtered[offset : offset + limit]
+    return [intent_queue_service.to_venue_event_read(event) for event in page]
+
+
+@router.get("/venues/events/export")
+async def export_execution_venue_events(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    venue: str | None = Query(default=None, max_length=64),
+    reconcile_state: VenueEventState | None = Query(default=None),
+    status_bucket: VenueStatusBucket | None = Query(default=None),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StreamingResponse:
+    events = list(
+        (
+            await session.scalars(
+                select(ExecutionVenueEvent)
+                .order_by(ExecutionVenueEvent.created_at.desc())
+                .limit(limit + offset)
+            )
+        ).all()
+    )
+    filtered = filter_venue_event_rows(
+        events,
+        venue=venue,
+        reconcile_state=reconcile_state,
+        status_bucket=status_bucket,
+        queue_service=intent_queue_service,
+    )
+    page = filtered[offset : offset + limit]
+    return csv_response(
+        "execution_venue_events.csv",
+        [
+            "id",
+            "created_at",
+            "venue",
+            "event_type",
+            "venue_status",
+            "status_bucket",
+            "reconcile_state",
+            "symbol",
+            "client_order_id",
+            "venue_order_id",
+            "ret_code",
+            "ret_msg",
+        ],
+        venue_events_csv_rows(page, intent_queue_service),
     )
 
 

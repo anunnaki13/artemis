@@ -7,6 +7,7 @@ import { KpiCard } from "@/components/kpi/kpi-card";
 import {
   buildApiUrl,
   type DailyDigestArtifactResponse,
+  type DailyDigestPreviewResponse,
   type DailyDigestSeriesPointResponse,
   type DashboardSummaryResponse,
   type ExecutionIntentResponse,
@@ -14,13 +15,15 @@ import {
   type MarketStreamStatusResponse,
   type OrderBookResponse,
   type UserStreamStatusResponse,
-  getBinanceUserStreamStatus,
+  getBybitUserStreamStatus,
+  getDailyDigestPreview,
   getDashboardSummary,
   getExecutionIntents,
   getLiquidityHistory,
   getMarketStreamStatus,
   getOrderbook,
   listDailyDigestArtifacts,
+  listDailyDigestRunsFiltered,
   listDailyDigestSeriesFiltered,
   runDailyDigest
 } from "@/lib/api";
@@ -28,6 +31,7 @@ import {
 type DashboardState = {
   summary: DashboardSummaryResponse | null;
   digests: DailyDigestArtifactResponse[];
+  digestRuns: DailyDigestArtifactResponse[];
   digestSeries: DailyDigestSeriesPointResponse[];
   marketStream: MarketStreamStatusResponse | null;
   userStream: UserStreamStatusResponse | null;
@@ -140,21 +144,71 @@ function buildMetricSparkPath(values: number[], width = 320, height = 82) {
     .join(" ");
 }
 
+function buildFlagMarkers(points: DailyDigestSeriesPointResponse[], width = 320, height = 100) {
+  if (points.length === 0) {
+    return [];
+  }
+  const anomalyValues = points.map((point) => point.anomaly_score);
+  const min = Math.min(...anomalyValues);
+  const max = Math.max(...anomalyValues);
+  const spread = max - min || 1;
+  return points
+    .map((point, index) => {
+      if (point.anomaly_score <= 0) {
+        return null;
+      }
+      const x = (index / Math.max(points.length - 1, 1)) * width;
+      const y = height - ((point.anomaly_score - min) / spread) * Math.max(height - 18, 1);
+      const tone = point.anomaly_flags.includes("negative_top_strategy_pnl")
+        ? "#ef4444"
+        : point.anomaly_flags.includes("high_lineage_alerts")
+          ? "#49c6ff"
+          : "#f59e0b";
+      return { x, y, tone, flags: point.anomaly_flags, reportDate: point.report_date };
+    })
+    .filter((point): point is { x: number; y: number; tone: string; flags: string[]; reportDate: string } => point !== null);
+}
+
 function exportCsv(path: string) {
   window.open(buildApiUrl(path), "_blank", "noopener,noreferrer");
 }
 
-function exportDigestSeriesCsv(days: number) {
-  const params = new URLSearchParams({ days: String(days), limit: "365" });
+function exportDigestSeriesCsv(options: {
+  days?: number;
+  startAt?: string;
+  endAt?: string;
+  flaggedOnly?: boolean;
+}) {
+  const params = new URLSearchParams({ limit: "365" });
+  if (options.days) {
+    params.set("days", String(options.days));
+  }
+  if (options.startAt) {
+    params.set("start_at", options.startAt);
+  }
+  if (options.endAt) {
+    params.set("end_at", options.endAt);
+  }
+  if (options.flaggedOnly) {
+    params.set("flagged_only", "true");
+  }
   window.open(buildApiUrl("/reports/daily-digest/series/export", params), "_blank", "noopener,noreferrer");
 }
 
 export default function DashboardPage() {
   const [digestRangeDays, setDigestRangeDays] = useState<(typeof DIGEST_RANGE_OPTIONS)[number]>(30);
   const [digestCompareMetric, setDigestCompareMetric] = useState<(typeof DIGEST_COMPARE_OPTIONS)[number]>("fills");
+  const [digestStartAt, setDigestStartAt] = useState("");
+  const [digestEndAt, setDigestEndAt] = useState("");
+  const [digestFlaggedOnly, setDigestFlaggedOnly] = useState(false);
+  const [selectedDigestReportDate, setSelectedDigestReportDate] = useState<string | null>(null);
+  const [selectedDigestPreview, setSelectedDigestPreview] = useState<DailyDigestPreviewResponse | null>(null);
+  const [selectedDigestPreviewError, setSelectedDigestPreviewError] = useState<string | null>(null);
+  const [selectedDigestPreviewLoading, setSelectedDigestPreviewLoading] = useState(false);
   const [state, setState] = useState<DashboardState>({
     summary: null,
     digests: [],
+    digestRuns: [],
     digestSeries: [],
     marketStream: null,
     userStream: null,
@@ -169,16 +223,35 @@ export default function DashboardPage() {
     let active = true;
 
     const load = async () => {
+      const digestSeriesRequest =
+        digestStartAt || digestEndAt
+          ? listDailyDigestSeriesFiltered({
+              startAt: digestStartAt || undefined,
+              endAt: digestEndAt || undefined,
+              flaggedOnly: digestFlaggedOnly,
+              limit: 365
+            })
+          : listDailyDigestSeriesFiltered({ days: digestRangeDays, flaggedOnly: digestFlaggedOnly, limit: 365 });
+      const digestRunsRequest =
+        digestStartAt || digestEndAt
+          ? listDailyDigestRunsFiltered({
+              startAt: digestStartAt || undefined,
+              endAt: digestEndAt || undefined,
+              flaggedOnly: digestFlaggedOnly,
+              limit: 365
+            })
+          : listDailyDigestRunsFiltered({ days: digestRangeDays, flaggedOnly: digestFlaggedOnly, limit: 365 });
       try {
-        const [summaryResult, marketStreamResult, userStreamResult, orderbookResult, liquidityHistoryResult, intentsResult, digestsResult, digestSeriesResult] = await Promise.allSettled([
+        const [summaryResult, marketStreamResult, userStreamResult, orderbookResult, liquidityHistoryResult, intentsResult, digestsResult, digestSeriesResult, digestRunsResult] = await Promise.allSettled([
           getDashboardSummary(),
           getMarketStreamStatus(),
-          getBinanceUserStreamStatus(),
+          getBybitUserStreamStatus(),
           getOrderbook("BTCUSDT", 7),
           getLiquidityHistory("BTCUSDT", 24),
           getExecutionIntents(8),
           listDailyDigestArtifacts(6),
-          listDailyDigestSeriesFiltered({ days: digestRangeDays, limit: 365 })
+          digestSeriesRequest,
+          digestRunsRequest
         ]);
         if (!active) {
           return;
@@ -189,6 +262,7 @@ export default function DashboardPage() {
         setState({
           summary: summaryResult.value,
           digests: digestsResult.status === "fulfilled" ? digestsResult.value : [],
+          digestRuns: digestRunsResult.status === "fulfilled" ? digestRunsResult.value : [],
           digestSeries: digestSeriesResult.status === "fulfilled" ? digestSeriesResult.value : [],
           marketStream: marketStreamResult.status === "fulfilled" ? marketStreamResult.value : null,
           userStream: userStreamResult.status === "fulfilled" ? userStreamResult.value : null,
@@ -219,17 +293,75 @@ export default function DashboardPage() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [digestRangeDays]);
+  }, [digestRangeDays, digestStartAt, digestEndAt, digestFlaggedOnly]);
+
+  useEffect(() => {
+    const reportDate =
+      selectedDigestReportDate ??
+      state.digestRuns[0]?.report_date ??
+      null;
+    if (!reportDate) {
+      setSelectedDigestPreview(null);
+      setSelectedDigestPreviewError(null);
+      setSelectedDigestPreviewLoading(false);
+      return;
+    }
+
+    let active = true;
+    setSelectedDigestPreviewLoading(true);
+    setSelectedDigestPreviewError(null);
+
+    void getDailyDigestPreview(reportDate)
+      .then((preview) => {
+        if (!active) {
+          return;
+        }
+        setSelectedDigestPreview(preview);
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+        setSelectedDigestPreview(null);
+        setSelectedDigestPreviewError(error instanceof Error ? error.message : "digest preview load failed");
+      })
+      .finally(() => {
+        if (!active) {
+          return;
+        }
+        setSelectedDigestPreviewLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedDigestReportDate, state.digestRuns]);
 
   const triggerDailyDigest = async () => {
     await runDailyDigest();
-    const [digests, digestSeries] = await Promise.all([
-      listDailyDigestArtifacts(6),
-      listDailyDigestSeriesFiltered({ days: digestRangeDays, limit: 365 })
-    ]);
+    const digestSeriesRequest =
+      digestStartAt || digestEndAt
+        ? listDailyDigestSeriesFiltered({
+            startAt: digestStartAt || undefined,
+            endAt: digestEndAt || undefined,
+            flaggedOnly: digestFlaggedOnly,
+            limit: 365
+          })
+        : listDailyDigestSeriesFiltered({ days: digestRangeDays, flaggedOnly: digestFlaggedOnly, limit: 365 });
+    const digestRunsRequest =
+      digestStartAt || digestEndAt
+        ? listDailyDigestRunsFiltered({
+            startAt: digestStartAt || undefined,
+            endAt: digestEndAt || undefined,
+            flaggedOnly: digestFlaggedOnly,
+            limit: 365
+          })
+        : listDailyDigestRunsFiltered({ days: digestRangeDays, flaggedOnly: digestFlaggedOnly, limit: 365 });
+    const [digests, digestSeries, digestRuns] = await Promise.all([listDailyDigestArtifacts(6), digestSeriesRequest, digestRunsRequest]);
     setState((current) => ({
       ...current,
       digests,
+      digestRuns,
       digestSeries,
       updatedAt: new Date().toISOString()
     }));
@@ -263,6 +395,33 @@ export default function DashboardPage() {
       : digestCompareMetric === "lineage_alerts"
         ? { label: "Lineage Alerts", path: lineageSparkPath, tone: "#49c6ff" }
         : { label: "Top Strategy PnL", path: topPnlSparkPath, tone: "#ef4444" };
+  const digestCompareValues =
+    digestCompareMetric === "fills"
+      ? state.digestSeries.map((point) => point.fills_count)
+      : digestCompareMetric === "lineage_alerts"
+        ? state.digestSeries.map((point) => point.lineage_alerts_count)
+        : state.digestSeries.map((point) => Number(point.top_strategy_realized_pnl_usd ?? 0));
+  const avgAnomaly =
+    state.digestSeries.length > 0
+      ? state.digestSeries.reduce((sum, point) => sum + point.anomaly_score, 0) / state.digestSeries.length
+      : 0;
+  const avgCompareValue =
+    digestCompareValues.length > 0
+      ? digestCompareValues.reduce((sum, value) => sum + value, 0) / digestCompareValues.length
+      : 0;
+  const flaggedDaysCount = state.digestSeries.filter((point) => point.anomaly_score > 0).length;
+  const worstTopStrategyPnl =
+    state.digestSeries.length > 0
+      ? Math.min(...state.digestSeries.map((point) => Number(point.top_strategy_realized_pnl_usd ?? 0)))
+      : 0;
+  const flagMarkers = buildFlagMarkers(state.digestSeries);
+  const zeroFillsDays = state.digestSeries.filter((point) => point.anomaly_flags.includes("zero_fills")).length;
+  const negativePnlDays = state.digestSeries.filter((point) => point.anomaly_flags.includes("negative_top_strategy_pnl")).length;
+  const highAlertDays = state.digestSeries.filter((point) => point.anomaly_flags.includes("high_lineage_alerts")).length;
+  const selectedDigestRun =
+    state.digestRuns.find((run) => run.report_date === selectedDigestReportDate) ??
+    state.digestRuns[0] ??
+    null;
 
   const riskRows = [
     {
@@ -540,6 +699,7 @@ export default function DashboardPage() {
                   <th className="px-2 py-2 text-right font-normal">FILLS</th>
                   <th className="px-2 py-2 text-right font-normal">WIN RATE</th>
                   <th className="px-2 py-2 text-right font-normal">REALIZED</th>
+                  <th className="px-2 py-2 text-right font-normal">SLIP COST</th>
                 </tr>
               </thead>
               <tbody>
@@ -555,11 +715,14 @@ export default function DashboardPage() {
                     >
                       {formatNumber(row.gross_realized_pnl_usd, 2)}
                     </td>
+                    <td className="px-2 py-2 text-right text-warning">
+                      {formatNumber(row.gross_adverse_slippage_cost_usd, 2)}
+                    </td>
                   </tr>
                 ))}
                 {(summary?.strategy_breakdown ?? []).length === 0 ? (
                   <tr className="border-t border-white/10">
-                    <td colSpan={4} className="px-2 py-4 text-center text-muted">
+                    <td colSpan={5} className="px-2 py-4 text-center text-muted">
                       No attributed fills yet.
                     </td>
                   </tr>
@@ -591,6 +754,10 @@ export default function DashboardPage() {
                 <div className="mt-1 flex items-center justify-between text-[11px] text-muted">
                   <span>{row.chains_count} chains / {row.fills_count} fills</span>
                   <span>{formatNumber(Number(row.win_rate) * 100, 1)}% win</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-muted">
+                  <span>slip {formatNumber(row.average_adverse_slippage_bps, 2)} bps</span>
+                  <span>underfill {formatCompact(row.gross_underfill_notional_usd)} USDT</span>
                 </div>
               </div>
             ))}
@@ -645,34 +812,102 @@ export default function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="Lineage Summary" action="operator replacement pressure">
-          <div className="mb-3 flex flex-wrap gap-2 font-mono text-[11px]">
-            <button
-              type="button"
-              onClick={() => exportCsv("/dashboard/summary/lineage-alerts/export")}
-              className="rounded border border-white/10 px-3 py-2 text-primary"
-            >
-              Export Lineage Alerts CSV
-            </button>
-          </div>
-          <div className="grid gap-2 font-mono text-xs">
-            <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
-              <div className="text-muted">Replacement lineages</div>
-              <div className="mt-1 text-xl text-primary">{summary?.lineage_summary?.replacement_lineages_count ?? 0}</div>
+        <div className="grid gap-3">
+          <Panel title="Lineage Summary" action="operator replacement pressure">
+            <div className="mb-3 flex flex-wrap gap-2 font-mono text-[11px]">
+              <button
+                type="button"
+                onClick={() => exportCsv("/dashboard/summary/lineage-alerts/export")}
+                className="rounded border border-white/10 px-3 py-2 text-primary"
+              >
+                Export Lineage Alerts CSV
+              </button>
             </div>
-            <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2">
-              <div className="text-warning">Open alerts</div>
-              <div className="mt-1 text-xl text-warning">{summary?.lineage_summary?.replacement_alerts_count ?? 0}</div>
+            <div className="grid gap-2 font-mono text-xs">
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Replacement lineages</div>
+                <div className="mt-1 text-xl text-primary">{summary?.lineage_summary?.replacement_lineages_count ?? 0}</div>
+              </div>
+              <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2">
+                <div className="text-warning">Open alerts</div>
+                <div className="mt-1 text-xl text-warning">{summary?.lineage_summary?.replacement_alerts_count ?? 0}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Worst slippage</div>
+                <div className="mt-1 text-xl text-secondary">{formatNumber(summary?.lineage_summary?.worst_slippage_bps, 2)} bps</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2 text-secondary">
+                Replacement alerts trigger on fill ratio below 90% or slippage above 5 bps.
+              </div>
             </div>
-            <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
-              <div className="text-muted">Worst slippage</div>
-              <div className="mt-1 text-xl text-secondary">{formatNumber(summary?.lineage_summary?.worst_slippage_bps, 2)} bps</div>
+          </Panel>
+
+          <Panel title="Venue Event Alerts" action="bybit reject cancel partial watch">
+            <div className="mb-3 grid grid-cols-3 gap-2 font-mono text-[11px]">
+              <div className="rounded border border-loss/30 bg-loss/10 px-2 py-2 text-center">
+                <div className="text-loss">Rejected</div>
+                <div className="mt-1 text-sm text-primary">{summary?.venue_event_summary?.rejected ?? 0}</div>
+              </div>
+              <div className="rounded border border-warning/30 bg-warning/10 px-2 py-2 text-center">
+                <div className="text-warning">Cancelled</div>
+                <div className="mt-1 text-sm text-primary">{summary?.venue_event_summary?.cancelled ?? 0}</div>
+              </div>
+              <div className="rounded border border-cyan/30 bg-cyan/10 px-2 py-2 text-center">
+                <div className="text-cyan">Partial</div>
+                <div className="mt-1 text-sm text-primary">{summary?.venue_event_summary?.partial ?? 0}</div>
+              </div>
             </div>
-            <div className="rounded border border-white/10 bg-black/25 px-3 py-2 text-secondary">
-              Replacement alerts trigger on fill ratio below 90% or slippage above 5 bps.
+            <div className="mb-3 flex flex-wrap gap-2 font-mono text-[11px]">
+              <button
+                type="button"
+                onClick={() => exportCsv("/execution/venues/events/export?status_bucket=rejected")}
+                className="rounded border border-white/10 px-3 py-2 text-primary"
+              >
+                Export Rejected CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => exportCsv("/execution/venues/events/export?status_bucket=cancelled")}
+                className="rounded border border-white/10 px-3 py-2 text-primary"
+              >
+                Export Cancelled CSV
+              </button>
             </div>
-          </div>
-        </Panel>
+            <div className="grid gap-2 font-mono text-xs">
+              {(summary?.venue_event_alerts ?? []).map((event) => (
+                <div key={event.id} className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-primary">{event.symbol ?? event.venue}</span>
+                    <span
+                      className={
+                        event.status_bucket === "rejected"
+                          ? "text-loss"
+                          : event.status_bucket === "cancelled"
+                            ? "text-warning"
+                            : "text-cyan"
+                      }
+                    >
+                      {event.venue_status}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
+                    <span>{event.event_type}</span>
+                    <span>{formatTimestamp(event.created_at)}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-secondary">
+                    {event.ret_code !== null ? `retCode ${event.ret_code}` : event.reconcile_state}
+                    {event.ret_msg ? ` • ${event.ret_msg}` : ""}
+                  </div>
+                </div>
+              ))}
+              {(summary?.venue_event_alerts ?? []).length === 0 ? (
+                <div className="rounded border border-white/10 bg-black/25 px-3 py-4 text-center text-muted">
+                  No recent Bybit venue alerts.
+                </div>
+              ) : null}
+            </div>
+          </Panel>
+        </div>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[0.9fr_1.1fr]">
@@ -769,7 +1004,11 @@ export default function DashboardPage() {
               <button
                 key={days}
                 type="button"
-                onClick={() => setDigestRangeDays(days)}
+                onClick={() => {
+                  setDigestRangeDays(days);
+                  setDigestStartAt("");
+                  setDigestEndAt("");
+                }}
                 className={`rounded border px-3 py-2 ${
                   digestRangeDays === days ? "border-cyan/40 bg-cyan/10 text-cyan" : "border-white/10 text-primary"
                 }`}
@@ -779,11 +1018,41 @@ export default function DashboardPage() {
             ))}
             <button
               type="button"
-              onClick={() => exportDigestSeriesCsv(digestRangeDays)}
+              onClick={() =>
+                exportDigestSeriesCsv({
+                  days: digestStartAt || digestEndAt ? undefined : digestRangeDays,
+                  startAt: digestStartAt || undefined,
+                  endAt: digestEndAt || undefined,
+                  flaggedOnly: digestFlaggedOnly
+                })
+              }
               className="rounded border border-white/10 px-3 py-2 text-primary"
             >
               Export Series CSV
             </button>
+          </div>
+          <div className="mb-3 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+            <input
+              type="date"
+              value={digestStartAt}
+              onChange={(event) => setDigestStartAt(event.target.value)}
+              className="rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-[11px] text-primary outline-none"
+            />
+            <input
+              type="date"
+              value={digestEndAt}
+              onChange={(event) => setDigestEndAt(event.target.value)}
+              className="rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-[11px] text-primary outline-none"
+            />
+            <label className="flex items-center gap-2 rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-[11px] text-secondary">
+              <input
+                type="checkbox"
+                checked={digestFlaggedOnly}
+                onChange={(event) => setDigestFlaggedOnly(event.target.checked)}
+                className="h-3.5 w-3.5 accent-amber-400"
+              />
+              flagged only
+            </label>
           </div>
           <div className="mb-3 flex flex-wrap gap-2 font-mono text-[11px]">
             {DIGEST_COMPARE_OPTIONS.map((metric) => (
@@ -813,9 +1082,63 @@ export default function DashboardPage() {
                 {anomalyOverlayPath ? (
                   <path d={anomalyOverlayPath} fill="none" stroke="#f59e0b" strokeWidth="3" />
                 ) : null}
+                {flagMarkers.map((marker) => (
+                  <circle
+                    key={`${marker.reportDate}-${marker.flags.join("-")}`}
+                    cx={marker.x}
+                    cy={marker.y}
+                    r="3.5"
+                    fill={marker.tone}
+                    className="cursor-pointer"
+                    onClick={() => setSelectedDigestReportDate(marker.reportDate)}
+                  >
+                    <title>{`${marker.reportDate}: ${marker.flags.join(", ")}`}</title>
+                  </circle>
+                ))}
               </svg>
+              <div className="mt-2 flex flex-wrap gap-3 font-mono text-[10px] text-muted">
+                <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-amber-400" />zero fills</span>
+                <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-red-500" />negative pnl</span>
+                <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-cyan-400" />high alerts</span>
+              </div>
             </div>
             <div className="grid gap-3">
+              <div className="grid gap-2">
+                <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">Avg anomaly</div>
+                    <div className="mt-1 text-warning">{formatNumber(avgAnomaly, 2)}</div>
+                  </div>
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">Flagged days</div>
+                    <div className="mt-1 text-primary">{flaggedDaysCount}</div>
+                  </div>
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">Avg {digestCompareConfig.label}</div>
+                    <div className="mt-1 text-secondary">{formatNumber(avgCompareValue, 2)}</div>
+                  </div>
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">Worst top pnl</div>
+                    <div className={`${worstTopStrategyPnl >= 0 ? "mt-1 text-profit" : "mt-1 text-loss"}`}>
+                      {formatNumber(worstTopStrategyPnl, 2)}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 font-mono text-[11px]">
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">Zero fills</div>
+                    <div className="mt-1 text-warning">{zeroFillsDays}</div>
+                  </div>
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">Neg pnl</div>
+                    <div className="mt-1 text-loss">{negativePnlDays}</div>
+                  </div>
+                  <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                    <div className="text-muted">High alerts</div>
+                    <div className="mt-1 text-cyan">{highAlertDays}</div>
+                  </div>
+                </div>
+              </div>
               {[
                 { label: "Anomaly", path: anomalySparkPath, tone: "#f59e0b" },
                 digestCompareConfig
@@ -846,19 +1169,30 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {[...state.digestSeries].reverse().slice(0, 7).map((row) => (
-                  <tr key={row.report_date} className="border-t border-white/10">
+                  <tr
+                    key={row.report_date}
+                    className={`cursor-pointer border-t border-white/10 ${
+                      selectedDigestRun?.report_date === row.report_date ? "bg-white/[0.04]" : ""
+                    }`}
+                    onClick={() => setSelectedDigestReportDate(row.report_date)}
+                  >
                     <td className="px-2 py-2 text-primary">{row.report_date}</td>
                     <td className={`px-2 py-2 text-right ${row.anomaly_score > 0 ? "text-warning" : "text-profit"}`}>
                       {row.anomaly_score}
                     </td>
                     <td className="px-2 py-2 text-right text-secondary">{row.fills_count}</td>
                     <td className="px-2 py-2 text-right text-cyan">{row.lineage_alerts_count}</td>
-                    <td
-                      className={`px-2 py-2 text-right ${
-                        Number(row.top_strategy_realized_pnl_usd ?? 0) >= 0 ? "text-profit" : "text-loss"
-                      }`}
-                    >
-                      {formatNumber(row.top_strategy_realized_pnl_usd, 2)}
+                    <td className="px-2 py-2 text-right">
+                      <div
+                        className={`${
+                          Number(row.top_strategy_realized_pnl_usd ?? 0) >= 0 ? "text-profit" : "text-loss"
+                        }`}
+                      >
+                        {formatNumber(row.top_strategy_realized_pnl_usd, 2)}
+                      </div>
+                      {row.anomaly_flags.length > 0 ? (
+                        <div className="mt-1 text-[10px] text-warning">{row.anomaly_flags.join(", ")}</div>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -875,11 +1209,188 @@ export default function DashboardPage() {
         </Panel>
       </div>
 
+      <Panel title="Digest Day Detail" action="selected run detail">
+        {selectedDigestRun ? (
+          <div className="grid gap-3 lg:grid-cols-[0.85fr_1.15fr]">
+            <div className="grid gap-2 font-mono text-xs">
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Report date</div>
+                <div className="mt-1 text-primary">{selectedDigestRun.report_date}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Generated</div>
+                <div className="mt-1 text-secondary">{formatTimestamp(selectedDigestRun.generated_at)}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Top strategy</div>
+                <div className="mt-1 text-primary">{selectedDigestRun.top_strategy ?? "n/a"}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Top pnl</div>
+                <div
+                  className={`mt-1 ${
+                    Number(selectedDigestRun.top_strategy_realized_pnl_usd ?? 0) >= 0 ? "text-profit" : "text-loss"
+                  }`}
+                >
+                  {formatNumber(selectedDigestRun.top_strategy_realized_pnl_usd, 2)} USDT
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-2 font-mono text-xs">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                  <div className="text-muted">Fills</div>
+                  <div className="mt-1 text-secondary">{selectedDigestRun.fills_count ?? 0}</div>
+                </div>
+                <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                  <div className="text-muted">Intents</div>
+                  <div className="mt-1 text-secondary">{selectedDigestRun.intents_count ?? 0}</div>
+                </div>
+                <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                  <div className="text-muted">Alerts</div>
+                  <div className="mt-1 text-warning">{selectedDigestRun.lineage_alerts_count ?? 0}</div>
+                </div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Anomaly score</div>
+                <div className="mt-1 text-warning">{selectedDigestRun.anomaly_score ?? 0}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Anomaly flags</div>
+                <div className="mt-1 text-secondary">
+                  {selectedDigestRun.anomaly_flags && selectedDigestRun.anomaly_flags.length > 0
+                    ? selectedDigestRun.anomaly_flags.join(", ")
+                    : "none"}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => exportCsv(`/reports/daily-digest/download?report_date=${selectedDigestRun.report_date}&artifact=json`)}
+                  className="rounded border border-white/10 px-3 py-2 text-primary"
+                >
+                  Open JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportCsv(`/reports/daily-digest/download?report_date=${selectedDigestRun.report_date}&artifact=strategy_csv`)}
+                  className="rounded border border-white/10 px-3 py-2 text-primary"
+                >
+                  Strategy CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportCsv(`/reports/daily-digest/download?report_date=${selectedDigestRun.report_date}&artifact=lineage_csv`)}
+                  className="rounded border border-white/10 px-3 py-2 text-primary"
+                >
+                  Lineage CSV
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-3 lg:col-span-2">
+              <div className="grid gap-3 xl:grid-cols-[1fr_1fr]">
+                <div className="rounded border border-white/10 bg-black/25 p-3">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase">
+                    <span className="text-muted">Strategy Breakdown Preview</span>
+                    <span className="text-secondary">
+                      {selectedDigestPreviewLoading ? "loading" : `${selectedDigestPreview?.strategy_breakdown.length ?? 0} rows`}
+                    </span>
+                  </div>
+                  {selectedDigestPreviewError ? (
+                    <div className="rounded border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss">
+                      {selectedDigestPreviewError}
+                    </div>
+                  ) : selectedDigestPreview && selectedDigestPreview.strategy_breakdown.length > 0 ? (
+                    <div className="overflow-hidden rounded border border-white/10">
+                      <table className="w-full font-mono text-xs">
+                        <thead className="bg-white/[0.04] text-muted">
+                          <tr>
+                            <th className="px-2 py-2 text-left font-normal">STRATEGY</th>
+                            <th className="px-2 py-2 text-right font-normal">FILLS</th>
+                            <th className="px-2 py-2 text-right font-normal">WIN</th>
+                            <th className="px-2 py-2 text-right font-normal">PNL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedDigestPreview.strategy_breakdown.slice(0, 5).map((row) => (
+                            <tr key={`preview-strategy-${row.source_strategy}`} className="border-t border-white/10">
+                              <td className="px-2 py-2 text-primary">{row.source_strategy}</td>
+                              <td className="px-2 py-2 text-right text-secondary">{row.fills_count}</td>
+                              <td className="px-2 py-2 text-right text-cyan">{formatNumber(Number(row.win_rate) * 100, 1)}%</td>
+                              <td
+                                className={`px-2 py-2 text-right ${
+                                  Number(row.gross_realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"
+                                }`}
+                              >
+                                {formatNumber(row.gross_realized_pnl_usd, 2)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="rounded border border-white/10 bg-black/25 px-3 py-4 text-center text-muted">
+                      No strategy rows for this digest.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded border border-white/10 bg-black/25 p-3">
+                  <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase">
+                    <span className="text-muted">Lineage Alerts Preview</span>
+                    <span className="text-secondary">
+                      {selectedDigestPreviewLoading ? "loading" : `${selectedDigestPreview?.lineage_alerts.length ?? 0} rows`}
+                    </span>
+                  </div>
+                  {selectedDigestPreviewError ? (
+                    <div className="rounded border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss">
+                      {selectedDigestPreviewError}
+                    </div>
+                  ) : selectedDigestPreview && selectedDigestPreview.lineage_alerts.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedDigestPreview.lineage_alerts.slice(0, 4).map((row) => (
+                        <div key={`preview-lineage-${row.root_intent_id}-${row.latest_intent_id}`} className="rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-primary">{row.symbol}</span>
+                            <span className="text-warning">{formatNumber(Number(row.fill_ratio) * 100, 1)}%</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-[11px] text-muted">
+                            <span>{row.source_strategy}</span>
+                            <span>{formatNumber(row.slippage_bps, 2)} bps</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-[11px]">
+                            <span className="text-muted">
+                              {row.root_intent_id} {"->"} {row.latest_intent_id} / {row.lineage_size} intents
+                            </span>
+                            <span className={Number(row.realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"}>
+                              {formatNumber(row.realized_pnl_usd, 2)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded border border-white/10 bg-black/25 px-3 py-4 text-center text-muted">
+                      No lineage alerts for this digest.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded border border-white/10 bg-black/25 px-3 py-4 text-center font-mono text-xs text-muted">
+            No digest run selected.
+          </div>
+        )}
+      </Panel>
+
       <Panel title="Critical Audit Stream" action="operator notes">
           <div className="grid gap-2 font-mono text-xs lg:grid-cols-4">
           <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-warning">
             <AlertTriangle size={14} className="mb-2" />
-            User stream requires valid Binance credentials and explicit live transport enablement before sync starts.
+            User stream requires valid Bybit credentials, Unified account setup, and explicit live transport enablement before sync starts.
           </div>
           <div className="rounded border border-white/10 bg-black/25 px-3 py-2 text-secondary">
             Market stream symbols: {(marketStream?.symbols ?? ["BTCUSDT"]).join(", ")}
