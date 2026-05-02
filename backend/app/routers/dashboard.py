@@ -15,12 +15,21 @@ from app.models import (
     MarketSnapshot,
     SpotAccountBalance,
     SpotExecutionFill,
+    SpotExecutionFillLotClose,
+    SpotPositionLot,
     SpotSymbolPosition,
     User,
 )
 from services.execution.account_state import SpotAccountStateService
-from services.execution.fill_analytics import summarize_intent_lineage_outcomes, summarize_strategy_quality
+from services.execution.bybit_runtime import resolve_bybit_execution_runtime, validate_bybit_runtime
+from services.execution.fill_analytics import (
+    summarize_intent_lineage_outcomes,
+    summarize_lot_hold_quality,
+    summarize_strategy_lot_hold_quality,
+    summarize_strategy_quality,
+)
 from services.execution.intent_queue import ExecutionIntentQueueService
+from services.market_data.bybit import BybitMarketDataClient
 from services.market_data.orderbook import metrics_from_payload
 from services.reports.daily_digest import DailyDigestService
 
@@ -28,6 +37,43 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 intent_queue_service = ExecutionIntentQueueService()
 account_state_service = SpotAccountStateService()
 digest_service = DailyDigestService()
+
+
+async def load_rest_liquidity_fallback(symbol: str = "BTCUSDT") -> dict[str, object] | None:
+    client = BybitMarketDataClient()
+    try:
+        orderbook = await client.orderbook(symbol)
+    except Exception:
+        return None
+    bids = orderbook.get("b", [])
+    asks = orderbook.get("a", [])
+    if not isinstance(bids, list) or not isinstance(asks, list) or not bids or not asks:
+        return None
+    best_bid = Decimal(str(bids[0][0]))
+    best_ask = Decimal(str(asks[0][0]))
+    spread = best_ask - best_bid
+    mid_price = (best_bid + best_ask) / Decimal("2") if (best_bid + best_ask) != Decimal("0") else None
+    spread_bps = None
+    if mid_price is not None and mid_price != Decimal("0"):
+        spread_bps = (spread / mid_price) * Decimal("10000")
+    bid_depth_notional = sum((Decimal(str(level[0])) * Decimal(str(level[1])) for level in bids[:10]), Decimal("0"))
+    ask_depth_notional = sum((Decimal(str(level[0])) * Decimal(str(level[1])) for level in asks[:10]), Decimal("0"))
+    imbalance_denominator = bid_depth_notional + ask_depth_notional
+    imbalance_ratio = (
+        (bid_depth_notional - ask_depth_notional) / imbalance_denominator
+        if imbalance_denominator != Decimal("0")
+        else None
+    )
+    return {
+        "symbol": symbol,
+        "timestamp": None,
+        "spread_bps": spread_bps,
+        "imbalance_ratio": imbalance_ratio,
+        "best_bid": best_bid,
+        "best_ask": best_ask,
+        "bid_depth_notional": bid_depth_notional,
+        "ask_depth_notional": ask_depth_notional,
+    }
 
 
 def csv_response(filename: str, headers: list[str], rows: list[list[object]]) -> StreamingResponse:
@@ -114,9 +160,32 @@ async def summary(
             "ask_depth_notional": metrics.ask_depth_notional_0p5pct,
         }
         break
+    if latest_liquidity is None:
+        latest_liquidity = await load_rest_liquidity_fallback("BTCUSDT")
 
     market_stream = stream_service.status()
     user_stream = user_stream_service.status()
+    bybit_runtime: dict[str, object] = {
+        "configured": False,
+        "live_ready": False,
+        "testnet": False,
+        "live_transport_enabled": False,
+        "account_type": None,
+        "issues": ["Bybit credentials are not configured"],
+    }
+    try:
+        runtime = await resolve_bybit_execution_runtime(session)
+        validation = await validate_bybit_runtime(session, runtime)
+        bybit_runtime = {
+            "configured": True,
+            "live_ready": validation.live_ready,
+            "testnet": runtime.testnet,
+            "live_transport_enabled": runtime.live_transport_enabled,
+            "account_type": runtime.account_type,
+            "issues": validation.issues,
+        }
+    except Exception as exc:
+        bybit_runtime["issues"] = [str(exc)]
     bot_status = "RUNNING" if market_stream.running else "PAUSED"
     if user_stream.running and user_stream.subscribed:
         execution_status = "LIVE SYNC"
@@ -154,11 +223,48 @@ async def summary(
             )
         ).all()
     )
+    fill_ids = [int(fill.id) for fill in fills if fill.id is not None]
+    lot_closes = list(
+        (
+            await session.scalars(
+                select(SpotExecutionFillLotClose)
+                .where(SpotExecutionFillLotClose.execution_fill_id.in_(fill_ids))
+                .order_by(SpotExecutionFillLotClose.closed_at.desc(), SpotExecutionFillLotClose.id.desc())
+            )
+        ).all()
+    ) if fill_ids else []
+    lot_by_id = {
+        int(lot.id): lot
+        for lot in (
+            await session.scalars(
+                select(SpotPositionLot).where(
+                    SpotPositionLot.id.in_([int(item.position_lot_id) for item in lot_closes])
+                )
+            )
+        ).all()
+    } if lot_closes else {}
     await session.commit()
     total_unrealized_pnl = sum((position.unrealized_pnl_usd or Decimal("0")) for position in positions)
     total_realized_pnl = sum(position.realized_pnl_usd for position in positions)
     strategy_breakdown = summarize_strategy_quality(fills)[:5]
-    lineage_outcomes = summarize_intent_lineage_outcomes(lineage_intents, fills)
+    strategy_hold_breakdown = {
+        item.source_strategy: item
+        for item in summarize_strategy_lot_hold_quality(
+            lot_closes,
+            strategy_by_fill_id={int(fill.id): fill.source_strategy for fill in fills},
+            lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+        )
+    }
+    hold_summary = summarize_lot_hold_quality(
+        lot_closes,
+        lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+    )
+    lineage_outcomes = summarize_intent_lineage_outcomes(
+        lineage_intents,
+        fills,
+        lot_closes=lot_closes,
+        lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+    )
     replacement_lineages = [item for item in lineage_outcomes if item.lineage_size > 1]
     replacement_alerts = [
         item
@@ -201,6 +307,7 @@ async def summary(
         "bot_status": bot_status,
         "market_regime": "MICROSTRUCTURE" if latest_liquidity is not None else "UNKNOWN",
         "execution_status": execution_status,
+        "bybit_runtime": bybit_runtime,
         "exposure_notional": exposure,
         "execution_counts": status_counts,
         "recent_intents": [
@@ -226,6 +333,31 @@ async def summary(
                 "gross_adverse_slippage_cost_usd": item.gross_adverse_slippage_cost_usd,
                 "average_adverse_slippage_bps": item.average_adverse_slippage_bps,
                 "gross_underfill_notional_usd": item.gross_underfill_notional_usd,
+                "average_hold_seconds": (
+                    strategy_hold_breakdown[item.source_strategy].average_hold_seconds
+                    if item.source_strategy in strategy_hold_breakdown
+                    else None
+                ),
+                "max_hold_seconds": (
+                    strategy_hold_breakdown[item.source_strategy].max_hold_seconds
+                    if item.source_strategy in strategy_hold_breakdown
+                    else None
+                ),
+                "lot_closes_count": (
+                    strategy_hold_breakdown[item.source_strategy].lot_closes_count
+                    if item.source_strategy in strategy_hold_breakdown
+                    else 0
+                ),
+                "short_hold_realized_pnl_usd": (
+                    strategy_hold_breakdown[item.source_strategy].short_hold_realized_pnl_usd
+                    if item.source_strategy in strategy_hold_breakdown
+                    else Decimal("0")
+                ),
+                "long_hold_realized_pnl_usd": (
+                    strategy_hold_breakdown[item.source_strategy].long_hold_realized_pnl_usd
+                    if item.source_strategy in strategy_hold_breakdown
+                    else Decimal("0")
+                ),
             }
             for item in strategy_breakdown
         ],
@@ -252,10 +384,21 @@ async def summary(
                 "fill_ratio": item.fill_ratio,
                 "slippage_bps": item.slippage_bps,
                 "realized_pnl_usd": item.realized_pnl_usd,
+                "average_hold_seconds": item.average_hold_seconds,
+                "max_hold_seconds": item.max_hold_seconds,
+                "short_hold_realized_pnl_usd": item.short_hold_realized_pnl_usd,
+                "long_hold_realized_pnl_usd": item.long_hold_realized_pnl_usd,
                 "last_fill_at": item.last_fill_at,
             }
             for item in replacement_alerts
         ],
+        "hold_summary": {
+            "lot_closes_count": hold_summary.lot_closes_count,
+            "average_hold_seconds": hold_summary.average_hold_seconds,
+            "max_hold_seconds": hold_summary.max_hold_seconds,
+            "short_hold_realized_pnl_usd": hold_summary.short_hold_realized_pnl_usd,
+            "long_hold_realized_pnl_usd": hold_summary.long_hold_realized_pnl_usd,
+        },
         "venue_event_summary": venue_event_summary,
         "venue_event_alerts": [
             {

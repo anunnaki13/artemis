@@ -28,6 +28,14 @@ export type DashboardSummaryResponse = {
   bot_status: string;
   market_regime: string;
   execution_status: string;
+  bybit_runtime: {
+    configured: boolean;
+    live_ready: boolean;
+    testnet: boolean;
+    live_transport_enabled: boolean;
+    account_type: string | null;
+    issues: string[];
+  };
   exposure_notional: string;
   execution_counts: Record<string, number>;
   recent_intents: Array<{
@@ -49,6 +57,11 @@ export type DashboardSummaryResponse = {
     gross_adverse_slippage_cost_usd: string;
     average_adverse_slippage_bps: string;
     gross_underfill_notional_usd: string;
+    average_hold_seconds: string | null;
+    max_hold_seconds: string | null;
+    lot_closes_count: number;
+    short_hold_realized_pnl_usd: string;
+    long_hold_realized_pnl_usd: string;
   }>;
   lineage_summary: {
     replacement_lineages_count: number;
@@ -74,8 +87,19 @@ export type DashboardSummaryResponse = {
     fill_ratio: string;
     slippage_bps: string | null;
     realized_pnl_usd: string;
+    average_hold_seconds: string | null;
+    max_hold_seconds: string | null;
+    short_hold_realized_pnl_usd: string;
+    long_hold_realized_pnl_usd: string;
     last_fill_at: string | null;
   }>;
+  hold_summary: {
+    lot_closes_count: number;
+    average_hold_seconds: string | null;
+    max_hold_seconds: string | null;
+    short_hold_realized_pnl_usd: string;
+    long_hold_realized_pnl_usd: string;
+  };
   venue_event_alerts: Array<{
     id: number;
     created_at: string;
@@ -169,6 +193,24 @@ export type UserStreamStatusResponse = {
   last_error: string | null;
 };
 
+export type ExecutionVenueEventResponse = {
+  id: number;
+  created_at: string;
+  reconciled_at: string | null;
+  execution_intent_id: number | null;
+  venue: string;
+  event_type: string;
+  venue_status: string;
+  symbol: string | null;
+  client_order_id: string | null;
+  venue_order_id: string | null;
+  reconcile_state: "pending" | "applied" | "ignored" | "unmatched";
+  status_bucket: "accepted" | "partial" | "filled" | "cancelled" | "rejected" | "pending" | "unknown";
+  ret_code: number | null;
+  ret_msg: string | null;
+  payload: Record<string, unknown>;
+};
+
 export type ExecutionIntentResponse = {
   id: number;
   created_at: string;
@@ -230,6 +272,18 @@ export type LiquidityPointResponse = {
   metrics: OrderBookResponse["metrics"];
 };
 
+export type CandleResponse = {
+  symbol: string;
+  timeframe: string;
+  open_time: string;
+  close_time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+};
+
 export type SpotExecutionFillResponse = {
   id: number;
   filled_at: string;
@@ -247,6 +301,58 @@ export type SpotExecutionFillResponse = {
   post_fill_net_quantity: string;
   post_fill_average_entry_price: string | null;
   source_event: string | null;
+};
+
+export type SpotExecutionFillLotCloseResponse = {
+  id: number;
+  execution_fill_id: number;
+  position_lot_id: number;
+  symbol: string;
+  closed_quantity: string;
+  lot_entry_price: string;
+  fill_exit_price: string;
+  realized_pnl_usd: string;
+  lot_opened_at: string | null;
+  hold_seconds: string | null;
+  closed_at: string;
+};
+
+export type SpotExecutionChainLotCloseSummaryResponse = {
+  chain_key: string;
+  symbol: string;
+  fills_count: number;
+  lot_slices_count: number;
+  lots_count: number;
+  total_closed_quantity: string;
+  total_realized_pnl_usd: string;
+  weighted_average_entry_price: string | null;
+  weighted_average_exit_price: string | null;
+  average_hold_seconds: string | null;
+  max_hold_seconds: string | null;
+  opened_at: string;
+  closed_at: string;
+};
+
+export type SpotExecutionChainLotCloseRowResponse = {
+  id: number;
+  execution_fill_id: number;
+  position_lot_id: number;
+  symbol: string;
+  closed_quantity: string;
+  lot_entry_price: string;
+  fill_exit_price: string;
+  realized_pnl_usd: string;
+  lot_opened_at: string | null;
+  hold_seconds: string | null;
+  closed_at: string;
+  fill_client_order_id: string | null;
+  fill_venue_order_id: string | null;
+  fill_source_strategy: string | null;
+};
+
+export type SpotExecutionChainLotCloseResponse = {
+  summary: SpotExecutionChainLotCloseSummaryResponse;
+  rows: SpotExecutionChainLotCloseRowResponse[];
 };
 
 export type SpotExecutionFillChainResponse = {
@@ -282,6 +388,12 @@ export type SpotExecutionFillSummaryResponse = {
   average_fill_notional_usd: string;
   average_realized_pnl_per_fill_usd: string;
   average_adverse_slippage_bps: string;
+  lot_closes_count: number;
+  average_hold_seconds: string | null;
+  max_hold_seconds: string | null;
+  average_realized_pnl_per_lot_close_usd: string;
+  short_hold_realized_pnl_usd: string;
+  long_hold_realized_pnl_usd: string;
   strategy_breakdown: Array<{
     source_strategy: string;
     fills_count: number;
@@ -292,6 +404,12 @@ export type SpotExecutionFillSummaryResponse = {
     gross_adverse_slippage_cost_usd: string;
     average_adverse_slippage_bps: string;
     gross_underfill_notional_usd: string;
+    lot_closes_count: number;
+    average_hold_seconds: string | null;
+    max_hold_seconds: string | null;
+    average_realized_pnl_per_lot_close_usd: string;
+    short_hold_realized_pnl_usd: string;
+    long_hold_realized_pnl_usd: string;
   }>;
   recent_chains: SpotExecutionFillChainResponse[];
 };
@@ -308,6 +426,35 @@ export type ExecutionIntentLineageOutcomeResponse = {
   approved_notional: string;
   created_at: string;
   latest_created_at: string;
+  fills_count: number;
+  filled_quantity: string;
+  filled_quote_quantity: string;
+  average_fill_price: string | null;
+  realized_pnl_usd: string;
+  fill_ratio: string;
+  slippage_bps: string | null;
+  adverse_slippage_bps: string | null;
+  slippage_cost_usd: string;
+  underfill_notional_usd: string;
+  average_hold_seconds: string | null;
+  max_hold_seconds: string | null;
+  short_hold_realized_pnl_usd: string;
+  long_hold_realized_pnl_usd: string;
+  last_fill_at: string | null;
+};
+
+export type ExecutionIntentOutcomeResponse = {
+  execution_intent_id: number;
+  symbol: string;
+  side: string;
+  source_strategy: string;
+  intent_status: string;
+  requested_notional: string;
+  approved_notional: string;
+  entry_price: string;
+  created_at: string;
+  dispatched_at: string | null;
+  executed_at: string | null;
   fills_count: number;
   filled_quantity: string;
   filled_quote_quantity: string;
@@ -491,6 +638,20 @@ export async function getExecutionIntents(limit = 8): Promise<ExecutionIntentRes
   return apiFetch<ExecutionIntentResponse[]>(`/execution/intents?limit=${limit}`);
 }
 
+export async function getExecutionIntentByOrderId(options: {
+  clientOrderId?: string | null;
+  venueOrderId?: string | null;
+}): Promise<ExecutionIntentResponse> {
+  const params = new URLSearchParams();
+  if (options.clientOrderId) {
+    params.set("client_order_id", options.clientOrderId);
+  }
+  if (options.venueOrderId) {
+    params.set("venue_order_id", options.venueOrderId);
+  }
+  return apiFetch<ExecutionIntentResponse>(`/execution/intents/by-order-id?${params.toString()}`);
+}
+
 export async function getOrderbook(symbol: string, limit = 8): Promise<OrderBookResponse> {
   return apiFetch<OrderBookResponse>(`/market-data/orderbook/${symbol}?limit=${limit}`);
 }
@@ -499,12 +660,21 @@ export async function getLiquidityHistory(symbol: string, limit = 24): Promise<L
   return apiFetch<LiquidityPointResponse[]>(`/market-data/liquidity/${symbol}/history?limit=${limit}`);
 }
 
+export async function getCandles(symbol: string, interval = "1m", limit = 60): Promise<CandleResponse[]> {
+  const params = new URLSearchParams({
+    symbol,
+    interval,
+    limit: String(limit),
+  });
+  return apiFetch<CandleResponse[]>(`/market-data/candles?${params.toString()}`);
+}
+
 export async function getExecutionFills(
   symbol?: string,
   limit = 50,
   strategy?: string,
   pnlFilter?: "winning" | "losing" | "flat",
-  options?: { startAt?: string; endAt?: string; offset?: number }
+  options?: { startAt?: string; endAt?: string; offset?: number; executionIntentId?: number }
 ): Promise<SpotExecutionFillResponse[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (symbol) {
@@ -525,7 +695,20 @@ export async function getExecutionFills(
   if (options?.offset) {
     params.set("offset", String(options.offset));
   }
+  if (options?.executionIntentId) {
+    params.set("execution_intent_id", String(options.executionIntentId));
+  }
   return apiFetch<SpotExecutionFillResponse[]>(`/execution/account/fills?${params.toString()}`);
+}
+
+export async function getExecutionFillLotCloses(fillId: number): Promise<SpotExecutionFillLotCloseResponse[]> {
+  return apiFetch<SpotExecutionFillLotCloseResponse[]>(`/execution/account/fills/${fillId}/lot-closes`);
+}
+
+export async function getExecutionChainLotCloses(chainKey: string): Promise<SpotExecutionChainLotCloseResponse> {
+  return apiFetch<SpotExecutionChainLotCloseResponse>(
+    `/execution/account/fills/chains/${encodeURIComponent(chainKey)}/lot-closes`
+  );
 }
 
 export async function getExecutionFillSummary(
@@ -534,7 +717,7 @@ export async function getExecutionFillSummary(
   recentChainsLimit = 20,
   strategy?: string,
   pnlFilter?: "winning" | "losing" | "flat",
-  options?: { startAt?: string; endAt?: string; recentChainsOffset?: number }
+  options?: { startAt?: string; endAt?: string; recentChainsOffset?: number; executionIntentId?: number }
 ): Promise<SpotExecutionFillSummaryResponse> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -558,6 +741,9 @@ export async function getExecutionFillSummary(
   if (options?.recentChainsOffset) {
     params.set("recent_chains_offset", String(options.recentChainsOffset));
   }
+  if (options?.executionIntentId) {
+    params.set("execution_intent_id", String(options.executionIntentId));
+  }
   return apiFetch<SpotExecutionFillSummaryResponse>(`/execution/account/fills/summary?${params.toString()}`);
 }
 
@@ -566,6 +752,8 @@ export async function getExecutionIntentLineageOutcomes(
   status?: string,
   limit = 50,
   options?: {
+    rootIntentId?: number;
+    latestIntentId?: number;
     minLineageSize?: number;
     flaggedOnly?: boolean;
     minSlippageBps?: number;
@@ -584,6 +772,12 @@ export async function getExecutionIntentLineageOutcomes(
   }
   if (options?.minLineageSize) {
     params.set("min_lineage_size", String(options.minLineageSize));
+  }
+  if (options?.rootIntentId) {
+    params.set("root_intent_id", String(options.rootIntentId));
+  }
+  if (options?.latestIntentId) {
+    params.set("latest_intent_id", String(options.latestIntentId));
   }
   if (options?.flaggedOnly) {
     params.set("flagged_only", "true");
@@ -604,6 +798,56 @@ export async function getExecutionIntentLineageOutcomes(
     params.set("offset", String(options.offset));
   }
   return apiFetch<ExecutionIntentLineageOutcomeResponse[]>(`/execution/intents/lineages/outcomes?${params.toString()}`);
+}
+
+export async function getExecutionIntentOutcomes(options?: {
+  strategy?: string;
+  status?: string;
+  limit?: number;
+  executionIntentId?: number;
+}): Promise<ExecutionIntentOutcomeResponse[]> {
+  const params = new URLSearchParams({ limit: String(options?.limit ?? 100) });
+  if (options?.strategy && options.strategy !== "all") {
+    params.set("strategy", options.strategy);
+  }
+  if (options?.status) {
+    params.set("status", options.status);
+  }
+  if (options?.executionIntentId) {
+    params.set("execution_intent_id", String(options.executionIntentId));
+  }
+  return apiFetch<ExecutionIntentOutcomeResponse[]>(`/execution/intents/outcomes?${params.toString()}`);
+}
+
+export async function getExecutionVenueEvents(options?: {
+  limit?: number;
+  offset?: number;
+  venue?: string;
+  symbol?: string;
+  query?: string;
+  reconcileState?: "pending" | "applied" | "ignored" | "unmatched";
+  statusBucket?: "accepted" | "partial" | "filled" | "cancelled" | "rejected" | "pending" | "unknown";
+}): Promise<ExecutionVenueEventResponse[]> {
+  const params = new URLSearchParams({ limit: String(options?.limit ?? 50) });
+  if (options?.offset) {
+    params.set("offset", String(options.offset));
+  }
+  if (options?.venue) {
+    params.set("venue", options.venue);
+  }
+  if (options?.symbol) {
+    params.set("symbol", options.symbol);
+  }
+  if (options?.query) {
+    params.set("query", options.query);
+  }
+  if (options?.reconcileState) {
+    params.set("reconcile_state", options.reconcileState);
+  }
+  if (options?.statusBucket) {
+    params.set("status_bucket", options.statusBucket);
+  }
+  return apiFetch<ExecutionVenueEventResponse[]>(`/execution/venues/events?${params.toString()}`);
 }
 
 export async function registerOwner(payload: RegisterPayload): Promise<RegisterResponse> {

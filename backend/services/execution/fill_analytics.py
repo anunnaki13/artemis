@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from app.models import ExecutionIntent, SpotExecutionFill
+from app.models import ExecutionIntent, SpotExecutionFill, SpotExecutionFillLotClose
 
 
 def order_chain_key(fill: SpotExecutionFill) -> str:
@@ -11,6 +11,20 @@ def order_chain_key(fill: SpotExecutionFill) -> str:
     if fill.venue_order_id:
         return f"venue:{fill.venue_order_id}"
     return f"fill:{fill.id}"
+
+
+def parse_order_chain_key(chain_key: str) -> tuple[str, str | int] | None:
+    prefix, separator, raw_value = chain_key.partition(":")
+    if separator == "" or raw_value == "":
+        return None
+    if prefix in {"client", "venue"}:
+        return prefix, raw_value
+    if prefix == "fill":
+        try:
+            return prefix, int(raw_value)
+        except ValueError:
+            return None
+    return None
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,33 @@ class FillQualitySummary:
 
 
 @dataclass(frozen=True)
+class LotHoldQualitySummary:
+    lot_closes_count: int
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    average_realized_pnl_per_lot_close_usd: Decimal
+    short_hold_realized_pnl_usd: Decimal
+    long_hold_realized_pnl_usd: Decimal
+
+
+@dataclass(frozen=True)
+class ChainLotCloseSummary:
+    chain_key: str
+    symbol: str
+    fills_count: int
+    lot_slices_count: int
+    lots_count: int
+    total_closed_quantity: Decimal
+    total_realized_pnl_usd: Decimal
+    weighted_average_entry_price: Decimal | None
+    weighted_average_exit_price: Decimal | None
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    opened_at: datetime
+    closed_at: datetime
+
+
+@dataclass(frozen=True)
 class StrategyQualitySummary:
     source_strategy: str
     fills_count: int
@@ -61,6 +102,17 @@ class StrategyQualitySummary:
     gross_adverse_slippage_cost_usd: Decimal
     average_adverse_slippage_bps: Decimal
     gross_underfill_notional_usd: Decimal
+
+
+@dataclass(frozen=True)
+class StrategyLotHoldSummary:
+    source_strategy: str
+    lot_closes_count: int
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    average_realized_pnl_per_lot_close_usd: Decimal
+    short_hold_realized_pnl_usd: Decimal
+    long_hold_realized_pnl_usd: Decimal
 
 
 @dataclass(frozen=True)
@@ -112,6 +164,10 @@ class IntentLineageOutcomeSummary:
     adverse_slippage_bps: Decimal | None
     slippage_cost_usd: Decimal
     underfill_notional_usd: Decimal
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    short_hold_realized_pnl_usd: Decimal
+    long_hold_realized_pnl_usd: Decimal
     last_fill_at: datetime | None
 
 
@@ -225,6 +281,132 @@ def summarize_fill_quality(fills: list[SpotExecutionFill]) -> FillQualitySummary
             else Decimal("0")
         ),
     )
+
+
+def summarize_chain_lot_closes(
+    chain_key: str,
+    fills: list[SpotExecutionFill],
+    lot_closes: list[SpotExecutionFillLotClose],
+    lot_opened_at: dict[int, datetime] | None = None,
+) -> ChainLotCloseSummary | None:
+    if not fills:
+        return None
+    ordered_fills = sorted(fills, key=lambda item: (item.filled_at, int(item.id)))
+    ordered_closes = sorted(lot_closes, key=lambda item: (item.closed_at, int(item.id)))
+    total_closed_quantity = sum((row.closed_quantity for row in ordered_closes), Decimal("0"))
+    total_realized_pnl_usd = sum((row.realized_pnl_usd for row in ordered_closes), Decimal("0"))
+    weighted_entry_numerator = sum(
+        (row.lot_entry_price * row.closed_quantity for row in ordered_closes),
+        Decimal("0"),
+    )
+    weighted_exit_numerator = sum(
+        (row.fill_exit_price * row.closed_quantity for row in ordered_closes),
+        Decimal("0"),
+    )
+    hold_seconds_points: list[Decimal] = []
+    if lot_opened_at is not None:
+        for row in ordered_closes:
+            opened_at = lot_opened_at.get(int(row.position_lot_id))
+            if opened_at is None:
+                continue
+            hold_seconds_points.append(
+                Decimal(str(max((row.closed_at - opened_at).total_seconds(), 0)))
+            )
+    return ChainLotCloseSummary(
+        chain_key=chain_key,
+        symbol=ordered_fills[0].symbol,
+        fills_count=len(ordered_fills),
+        lot_slices_count=len(ordered_closes),
+        lots_count=len({int(row.position_lot_id) for row in ordered_closes}),
+        total_closed_quantity=total_closed_quantity,
+        total_realized_pnl_usd=total_realized_pnl_usd,
+        weighted_average_entry_price=(
+            weighted_entry_numerator / total_closed_quantity if total_closed_quantity > Decimal("0") else None
+        ),
+        weighted_average_exit_price=(
+            weighted_exit_numerator / total_closed_quantity if total_closed_quantity > Decimal("0") else None
+        ),
+        average_hold_seconds=(
+            sum(hold_seconds_points, Decimal("0")) / Decimal(len(hold_seconds_points))
+            if hold_seconds_points
+            else None
+        ),
+        max_hold_seconds=max(hold_seconds_points) if hold_seconds_points else None,
+        opened_at=ordered_fills[0].filled_at,
+        closed_at=(ordered_closes[-1].closed_at if ordered_closes else ordered_fills[-1].filled_at),
+    )
+
+
+def summarize_lot_hold_quality(
+    lot_closes: list[SpotExecutionFillLotClose],
+    *,
+    strategy_by_fill_id: dict[int, str | None] | None = None,
+    lot_opened_at: dict[int, datetime] | None = None,
+    short_hold_threshold_seconds: Decimal = Decimal("3600"),
+) -> LotHoldQualitySummary:
+    hold_seconds_points: list[Decimal] = []
+    short_hold_realized = Decimal("0")
+    long_hold_realized = Decimal("0")
+    for row in lot_closes:
+        hold_seconds: Decimal | None = None
+        if lot_opened_at is not None:
+            opened_at = lot_opened_at.get(int(row.position_lot_id))
+            if opened_at is not None:
+                hold_seconds = Decimal(str(max((row.closed_at - opened_at).total_seconds(), 0)))
+                hold_seconds_points.append(hold_seconds)
+        if hold_seconds is not None and hold_seconds <= short_hold_threshold_seconds:
+            short_hold_realized += row.realized_pnl_usd
+        elif hold_seconds is not None:
+            long_hold_realized += row.realized_pnl_usd
+    lot_closes_count = len(lot_closes)
+    gross_realized = sum((row.realized_pnl_usd for row in lot_closes), Decimal("0"))
+    return LotHoldQualitySummary(
+        lot_closes_count=lot_closes_count,
+        average_hold_seconds=(
+            sum(hold_seconds_points, Decimal("0")) / Decimal(len(hold_seconds_points))
+            if hold_seconds_points
+            else None
+        ),
+        max_hold_seconds=max(hold_seconds_points) if hold_seconds_points else None,
+        average_realized_pnl_per_lot_close_usd=(
+            gross_realized / Decimal(lot_closes_count) if lot_closes_count > 0 else Decimal("0")
+        ),
+        short_hold_realized_pnl_usd=short_hold_realized,
+        long_hold_realized_pnl_usd=long_hold_realized,
+    )
+
+
+def summarize_strategy_lot_hold_quality(
+    lot_closes: list[SpotExecutionFillLotClose],
+    *,
+    strategy_by_fill_id: dict[int, str | None],
+    lot_opened_at: dict[int, datetime] | None = None,
+    short_hold_threshold_seconds: Decimal = Decimal("3600"),
+) -> list[StrategyLotHoldSummary]:
+    grouped: dict[str, list[SpotExecutionFillLotClose]] = {}
+    for row in lot_closes:
+        strategy = strategy_by_fill_id.get(int(row.execution_fill_id)) or "unattributed"
+        grouped.setdefault(strategy, []).append(row)
+    summaries: list[StrategyLotHoldSummary] = []
+    for strategy, rows in grouped.items():
+        summary = summarize_lot_hold_quality(
+            rows,
+            strategy_by_fill_id=strategy_by_fill_id,
+            lot_opened_at=lot_opened_at,
+            short_hold_threshold_seconds=short_hold_threshold_seconds,
+        )
+        summaries.append(
+            StrategyLotHoldSummary(
+                source_strategy=strategy,
+                lot_closes_count=summary.lot_closes_count,
+                average_hold_seconds=summary.average_hold_seconds,
+                max_hold_seconds=summary.max_hold_seconds,
+                average_realized_pnl_per_lot_close_usd=summary.average_realized_pnl_per_lot_close_usd,
+                short_hold_realized_pnl_usd=summary.short_hold_realized_pnl_usd,
+                long_hold_realized_pnl_usd=summary.long_hold_realized_pnl_usd,
+            )
+        )
+    return sorted(summaries, key=lambda item: item.source_strategy)
 
 
 def summarize_strategy_quality(fills: list[SpotExecutionFill]) -> list[StrategyQualitySummary]:
@@ -352,6 +534,9 @@ def summarize_intent_outcomes(
 def summarize_intent_lineage_outcomes(
     intents: list[ExecutionIntent],
     fills: list[SpotExecutionFill],
+    *,
+    lot_closes: list[SpotExecutionFillLotClose] | None = None,
+    lot_opened_at: dict[int, datetime] | None = None,
 ) -> list[IntentLineageOutcomeSummary]:
     intents_by_id = {int(intent.id): intent for intent in intents if intent.id is not None}
 
@@ -389,6 +574,14 @@ def summarize_intent_lineage_outcomes(
             if fill.execution_intent_id is not None
             and int(fill.execution_intent_id) in lineage_intent_ids
         ]
+        lineage_fill_ids = {int(fill.id) for fill in lineage_fills if fill.id is not None}
+        lineage_lot_closes = [
+            row for row in (lot_closes or []) if int(row.execution_fill_id) in lineage_fill_ids
+        ]
+        hold_summary = summarize_lot_hold_quality(
+            lineage_lot_closes,
+            lot_opened_at=lot_opened_at,
+        )
         lineage_intent_outcomes = summarize_intent_outcomes(ordered_intents, lineage_fills)
         latest_outcome = next(
             item for item in lineage_intent_outcomes if item.execution_intent_id == int(latest_intent.id)
@@ -426,6 +619,10 @@ def summarize_intent_lineage_outcomes(
                     > sum((fill.quote_quantity for fill in lineage_fills), Decimal("0"))
                     else Decimal("0")
                 ),
+                average_hold_seconds=hold_summary.average_hold_seconds,
+                max_hold_seconds=hold_summary.max_hold_seconds,
+                short_hold_realized_pnl_usd=hold_summary.short_hold_realized_pnl_usd,
+                long_hold_realized_pnl_usd=hold_summary.long_hold_realized_pnl_usd,
                 last_fill_at=max((fill.filled_at for fill in lineage_fills), default=None),
             )
         )

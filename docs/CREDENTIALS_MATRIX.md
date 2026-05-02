@@ -16,10 +16,11 @@ This maps the v2 blueprint credentials that must be configured before paper/live
 |---|---:|---|---|
 | `BYBIT_API_KEY` | Yes for paper/live | Exchange account/trading API | Must be trade-only. |
 | `BYBIT_API_SECRET` | Yes for paper/live | Request signing | Never display full value after save. |
-| `BYBIT_TESTNET` | Yes | Paper/test environment switch | `true` for testnet workflows. |
+| `BYBIT_TESTNET` | Yes | Paper/test environment switch | `true` for testnet or demo-key workflows. |
 | `BYBIT_API_BASE_URL` | Optional | Override mainnet/testnet API endpoint | Leave empty unless routing through a custom endpoint. |
 | `BYBIT_ACCOUNT_TYPE` | Yes | Venue account mode | Use `UNIFIED`. |
 | `BYBIT_WITHDRAWAL_ENABLED` | Yes before live | Operator safety acknowledgement | Must remain `false`. |
+| `EXECUTION_LIVE_TRANSPORT_ENABLED` | Yes before venue order tests | Final execution safety switch | Keep `false` while validating dashboard/runtime only. |
 | `BYBIT_VIP_TIER` | Yes | Fee model and net PnL | Default `0`. |
 | `BYBIT_WHITELISTED_IP` | Yes before live | Bybit IP whitelist | Current VPS IP: `103.150.197.225`. |
 
@@ -29,6 +30,8 @@ Hard rules from blueprint:
 - IP restriction must be enabled.
 - Unified Trading Account should be enabled.
 - Bot should refuse startup if withdrawal is enabled or IP restriction is missing.
+- For demo testing, use matching demo/testnet credentials and set `BYBIT_TESTNET=true`.
+- Do not set `EXECUTION_LIVE_TRANSPORT_ENABLED=true` until the runtime panel shows the account is ready and you intend to test actual venue order placement.
 
 ## AI / OpenRouter
 

@@ -15,7 +15,7 @@ const sections = [
   {
     title: "Bybit",
     icon: KeyRound,
-    description: "Trade-only API credentials. Withdrawal must be disabled, IP restriction enabled, and Unified Trading Account used.",
+    description: "Trade-only API credentials. For demo testing use matching Bybit testnet/demo keys with BYBIT_TESTNET=true. Withdrawal must stay disabled, IP restriction enabled, and Unified Trading Account used.",
     fields: [
       ["BYBIT_API_KEY", "Bybit API key", "password"],
       ["BYBIT_API_SECRET", "Bybit API secret", "password"],
@@ -23,6 +23,7 @@ const sections = [
       ["BYBIT_API_BASE_URL", "https://api.bybit.com", "text"],
       ["BYBIT_ACCOUNT_TYPE", "UNIFIED", "text"],
       ["BYBIT_WITHDRAWAL_ENABLED", "false", "text"],
+      ["EXECUTION_LIVE_TRANSPORT_ENABLED", "false", "text"],
       ["BYBIT_VIP_TIER", "0", "number"],
       ["BYBIT_WHITELISTED_IP", "103.150.197.225", "text"]
     ]
@@ -112,6 +113,9 @@ export default function SettingsPage() {
             <ShieldCheck className="mb-3 text-profit" size={18} />
             <div className="font-mono text-xs text-profit">Risk hard limits remain immutable at runtime.</div>
           </div>
+        </div>
+        <div className="mt-3 rounded border border-cyan/30 bg-cyan/10 p-3 font-mono text-xs text-cyan">
+          Demo/test flow: use Bybit demo or testnet API keys, set `BYBIT_TESTNET=true`, keep `EXECUTION_LIVE_TRANSPORT_ENABLED=false` until runtime shows ready, then enable live transport only when you intentionally want venue order placement tests.
         </div>
       </section>
 

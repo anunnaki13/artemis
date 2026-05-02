@@ -210,6 +210,58 @@ class SpotExecutionFillRead(BaseModel):
     source_event: str | None
 
 
+class SpotExecutionFillLotCloseRead(BaseModel):
+    id: int
+    execution_fill_id: int
+    position_lot_id: int
+    symbol: str
+    closed_quantity: Decimal
+    lot_entry_price: Decimal
+    fill_exit_price: Decimal
+    realized_pnl_usd: Decimal
+    lot_opened_at: datetime | None
+    hold_seconds: Decimal | None
+    closed_at: datetime
+
+
+class SpotExecutionChainLotCloseSummaryRead(BaseModel):
+    chain_key: str
+    symbol: str
+    fills_count: int
+    lot_slices_count: int
+    lots_count: int
+    total_closed_quantity: Decimal
+    total_realized_pnl_usd: Decimal
+    weighted_average_entry_price: Decimal | None
+    weighted_average_exit_price: Decimal | None
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    opened_at: datetime
+    closed_at: datetime
+
+
+class SpotExecutionChainLotCloseRead(BaseModel):
+    id: int
+    execution_fill_id: int
+    position_lot_id: int
+    symbol: str
+    closed_quantity: Decimal
+    lot_entry_price: Decimal
+    fill_exit_price: Decimal
+    realized_pnl_usd: Decimal
+    lot_opened_at: datetime | None
+    hold_seconds: Decimal | None
+    closed_at: datetime
+    fill_client_order_id: str | None
+    fill_venue_order_id: str | None
+    fill_source_strategy: str | None
+
+
+class SpotExecutionChainLotCloseResponse(BaseModel):
+    summary: SpotExecutionChainLotCloseSummaryRead
+    rows: list[SpotExecutionChainLotCloseRead]
+
+
 class SpotExecutionFillChainRead(BaseModel):
     chain_key: str
     symbol: str
@@ -243,6 +295,12 @@ class SpotExecutionFillSummaryRead(BaseModel):
     average_realized_pnl_per_fill_usd: Decimal
     gross_adverse_slippage_cost_usd: Decimal
     average_adverse_slippage_bps: Decimal
+    lot_closes_count: int
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    average_realized_pnl_per_lot_close_usd: Decimal
+    short_hold_realized_pnl_usd: Decimal
+    long_hold_realized_pnl_usd: Decimal
     strategy_breakdown: list[dict[str, object]]
     recent_chains: list[SpotExecutionFillChainRead]
 
@@ -294,6 +352,10 @@ class ExecutionIntentLineageOutcomeRead(BaseModel):
     adverse_slippage_bps: Decimal | None
     slippage_cost_usd: Decimal
     underfill_notional_usd: Decimal
+    average_hold_seconds: Decimal | None
+    max_hold_seconds: Decimal | None
+    short_hold_realized_pnl_usd: Decimal
+    long_hold_realized_pnl_usd: Decimal
     last_fill_at: datetime | None
 
 

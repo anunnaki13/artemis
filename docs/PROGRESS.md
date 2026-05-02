@@ -5,6 +5,13 @@
 ### Completed
 
 - Promoted Bybit to the active venue runtime across market data, execution preview, and private-stream account sync.
+- Added safer Bybit operator/runtime visibility:
+  - dashboard now shows Bybit runtime readiness, mainnet/testnet mode, and transport safety state
+  - settings guidance now explains demo/testnet flow and keeps live transport as an explicit last switch
+- Fixed the dashboard price stream so it now renders actual candle closes rather than reusing liquidity-history lines:
+  - `/api/market-data/candles` now refreshes stale Bybit candle data on demand
+  - dashboard price stream supports `BTCUSDT`, `ETHUSDT`, and `SOLUSDT`
+  - dashboard price stream supports `1m`, `5m`, and `15m`
 - Added Bybit REST/WebSocket market-data clients and stream service for:
   - Spot symbol sync
   - candle ingestion
@@ -29,10 +36,23 @@
   - adverse slippage bps
   - adverse slippage cost
   - underfill notional
+- Added FIFO lot-level spot position accounting:
+  - new `spot_position_lots` table
+  - realized PnL on sells now consumes persisted open lots instead of relying only on blended average-entry math
+- Added close-lot audit trail:
+  - new `spot_execution_fill_lot_closes` table
+  - each closing fill now records which lots it consumed and realized PnL per consumed lot slice
+- Added chain-level FIFO lot-close review:
+  - `/api/execution/account/fills/chains/{chain_key}/lot-closes`
+  - weighted entry/exit rollup per chain
+  - hold-to-close timing derived from persisted lot `opened_at` and close timestamps
 - Surfaced execution-cost metrics in:
   - dashboard strategy cohorts
   - Journal
   - Execution Quality
+- Surfaced FIFO lot-close review in operator UI:
+  - `Journal` now shows per-fill and per-chain lot-close breakdown
+  - `Execution Quality` now shows lot hold cohorts for selected recent chains
 
 ### Current Delivered Sequence
 
@@ -49,7 +69,7 @@
 ### Next Development Sequence
 
 1. build dedicated Venue Events review page and deeper operator filters
-2. strengthen lot-level PnL and close accounting
+2. extend lot-level PnL and close accounting into broader execution-quality rollups
 3. expand strategy registry
 4. build research pipeline: backtest, walk-forward, Monte Carlo, sensitivity
 5. add recovery, dead-man switch, and alerting hardening

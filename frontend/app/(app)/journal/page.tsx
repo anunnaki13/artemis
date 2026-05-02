@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import {
   buildApiUrl,
   type ExecutionIntentLineageOutcomeResponse,
+  type SpotExecutionChainLotCloseResponse,
   type SpotExecutionFillResponse,
+  type SpotExecutionFillLotCloseResponse,
   type SpotExecutionFillSummaryResponse,
+  getExecutionChainLotCloses,
+  getExecutionFillLotCloses,
   getExecutionFills,
   getExecutionFillSummary,
   getExecutionIntentLineageOutcomes
@@ -18,6 +23,20 @@ type JournalState = {
   lineages: ExecutionIntentLineageOutcomeResponse[];
   error: string | null;
   updatedAt: string | null;
+};
+
+type FillDetailState = {
+  fillId: number | null;
+  loading: boolean;
+  error: string | null;
+  lotCloses: SpotExecutionFillLotCloseResponse[];
+};
+
+type ChainDetailState = {
+  chainKey: string | null;
+  loading: boolean;
+  error: string | null;
+  detail: SpotExecutionChainLotCloseResponse | null;
 };
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -63,6 +82,17 @@ function formatBps(value: number | string | null | undefined) {
   return `${parsed.toFixed(2)} bps`;
 }
 
+function formatDurationHours(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "--";
+  }
+  return `${(parsed / 3600).toFixed(2)}h`;
+}
+
 function startOfDayUtc(value: string) {
   return value ? `${value}T00:00:00.000Z` : undefined;
 }
@@ -75,7 +105,18 @@ function exportCsv(path: string, params: URLSearchParams) {
   window.open(buildApiUrl(path, params), "_blank", "noopener,noreferrer");
 }
 
+function buildFillChainKey(fill: SpotExecutionFillResponse) {
+  if (fill.client_order_id) {
+    return `client:${fill.client_order_id}`;
+  }
+  if (fill.venue_order_id) {
+    return `venue:${fill.venue_order_id}`;
+  }
+  return `fill:${fill.id}`;
+}
+
 export default function JournalPage() {
+  const searchParams = useSearchParams();
   const [state, setState] = useState<JournalState>({
     summary: null,
     fills: [],
@@ -84,12 +125,29 @@ export default function JournalPage() {
     updatedAt: null
   });
 
-  const [strategyFilter, setStrategyFilter] = useState("all");
-  const [focusFilter, setFocusFilter] = useState("all");
+  const [strategyFilter, setStrategyFilter] = useState(() => searchParams.get("strategy") ?? "all");
+  const [focusFilter, setFocusFilter] = useState(() => searchParams.get("focus") ?? "all");
+  const intentIdFilter = searchParams.get("intent_id");
+  const rootIntentIdFilter = searchParams.get("root_intent_id");
+  const latestIntentIdFilter = searchParams.get("latest_intent_id");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [fillOffset, setFillOffset] = useState(0);
   const [lineageOffset, setLineageOffset] = useState(0);
+  const [selectedFillId, setSelectedFillId] = useState<number | null>(null);
+  const [selectedChainKey, setSelectedChainKey] = useState<string | null>(null);
+  const [fillDetail, setFillDetail] = useState<FillDetailState>({
+    fillId: null,
+    loading: false,
+    error: null,
+    lotCloses: []
+  });
+  const [chainDetail, setChainDetail] = useState<ChainDetailState>({
+    chainKey: null,
+    loading: false,
+    error: null,
+    detail: null
+  });
 
   useEffect(() => {
     let active = true;
@@ -104,18 +162,22 @@ export default function JournalPage() {
           getExecutionFillSummary(undefined, 500, 12, strategyFilter, pnlFilter, {
             startAt,
             endAt,
-            recentChainsOffset: fillOffset
+            recentChainsOffset: fillOffset,
+            executionIntentId: intentIdFilter ? Number(intentIdFilter) : undefined
           }),
           getExecutionFills(undefined, 40, strategyFilter, pnlFilter, {
             startAt,
             endAt,
-            offset: fillOffset
+            offset: fillOffset,
+            executionIntentId: intentIdFilter ? Number(intentIdFilter) : undefined
           }),
           getExecutionIntentLineageOutcomes(
             strategyFilter,
             undefined,
             12,
             {
+              rootIntentId: rootIntentIdFilter ? Number(rootIntentIdFilter) : undefined,
+              latestIntentId: latestIntentIdFilter ? Number(latestIntentIdFilter) : undefined,
               minLineageSize: focusFilter === "replacement-heavy" ? 2 : 1,
               flaggedOnly: focusFilter === "slippage-alert",
               minSlippageBps: focusFilter === "slippage-alert" ? 5 : undefined,
@@ -154,7 +216,7 @@ export default function JournalPage() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [fillOffset, focusFilter, fromDate, lineageOffset, strategyFilter, toDate]);
+  }, [fillOffset, focusFilter, fromDate, intentIdFilter, latestIntentIdFilter, lineageOffset, rootIntentIdFilter, strategyFilter, toDate]);
 
   const summary = state.summary;
   const strategyOptions = useMemo(() => {
@@ -171,6 +233,8 @@ export default function JournalPage() {
   const filteredChains = summary?.recent_chains ?? [];
   const filteredFills = state.fills;
   const filteredLineages = state.lineages;
+  const selectedFill = filteredFills.find((fill) => fill.id === selectedFillId) ?? null;
+  const selectedChain = filteredChains.find((chain) => chain.chain_key === selectedChainKey) ?? null;
   const exportParams = useMemo(() => {
     const params = new URLSearchParams();
     const pnlFilter =
@@ -203,6 +267,102 @@ export default function JournalPage() {
     return params;
   }, [exportParams, focusFilter]);
 
+  useEffect(() => {
+    if (selectedFillId === null) {
+      setFillDetail({
+        fillId: null,
+        loading: false,
+        error: null,
+        lotCloses: []
+      });
+      return;
+    }
+
+    let active = true;
+    setFillDetail((current) => ({
+      ...current,
+      fillId: selectedFillId,
+      loading: true,
+      error: null
+    }));
+
+    void getExecutionFillLotCloses(selectedFillId)
+      .then((lotCloses) => {
+        if (!active) {
+          return;
+        }
+        setFillDetail({
+          fillId: selectedFillId,
+          loading: false,
+          error: null,
+          lotCloses
+        });
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+        setFillDetail({
+          fillId: selectedFillId,
+          loading: false,
+          error: error instanceof Error ? error.message : "fill lot close load failed",
+          lotCloses: []
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedFillId]);
+
+  useEffect(() => {
+    if (selectedChainKey === null) {
+      setChainDetail({
+        chainKey: null,
+        loading: false,
+        error: null,
+        detail: null
+      });
+      return;
+    }
+
+    let active = true;
+    setChainDetail({
+      chainKey: selectedChainKey,
+      loading: true,
+      error: null,
+      detail: null
+    });
+
+    void getExecutionChainLotCloses(selectedChainKey)
+      .then((detail) => {
+        if (!active) {
+          return;
+        }
+        setChainDetail({
+          chainKey: selectedChainKey,
+          loading: false,
+          error: null,
+          detail
+        });
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+        setChainDetail({
+          chainKey: selectedChainKey,
+          loading: false,
+          error: error instanceof Error ? error.message : "chain lot close load failed",
+          detail: null
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedChainKey]);
+
   return (
     <div className="space-y-3">
       <div className="market-panel rounded px-4 py-3">
@@ -219,6 +379,14 @@ export default function JournalPage() {
         {state.error ? (
           <div className="mt-3 rounded border border-loss/30 bg-loss/10 px-3 py-2 font-mono text-[11px] text-loss">
             {state.error}
+          </div>
+        ) : null}
+        {intentIdFilter || rootIntentIdFilter || latestIntentIdFilter ? (
+          <div className="mt-3 rounded border border-cyan/30 bg-cyan/10 px-3 py-2 font-mono text-[11px] text-cyan">
+            scoped review
+            {intentIdFilter ? ` / intent ${intentIdFilter}` : ""}
+            {rootIntentIdFilter ? ` / root ${rootIntentIdFilter}` : ""}
+            {latestIntentIdFilter ? ` / latest ${latestIntentIdFilter}` : ""}
           </div>
         ) : null}
       </div>
@@ -349,7 +517,11 @@ export default function JournalPage() {
               </thead>
               <tbody className="divide-y divide-white/5">
                 {filteredChains.map((chain) => (
-                  <tr key={chain.chain_key}>
+                  <tr
+                    key={chain.chain_key}
+                    className={`cursor-pointer ${selectedChainKey === chain.chain_key ? "bg-cyan/10" : ""}`}
+                    onClick={() => setSelectedChainKey(chain.chain_key)}
+                  >
                     <td className="py-2">
                       <div className="font-medium text-primary">{chain.symbol}</div>
                       <div className="font-mono text-[11px] text-muted">{chain.client_order_id ?? chain.venue_order_id ?? chain.chain_key}</div>
@@ -371,7 +543,14 @@ export default function JournalPage() {
         <Panel title="Recent Fills">
           <div className="space-y-2">
             {filteredFills.map((fill) => (
-              <div key={fill.id} className="rounded border border-white/8 bg-white/[0.03] px-3 py-2">
+              <div
+                key={fill.id}
+                className={`cursor-pointer rounded border px-3 py-2 ${selectedFillId === fill.id ? "border-cyan/40 bg-cyan/10" : "border-white/8 bg-white/[0.03]"}`}
+                onClick={() => {
+                  setSelectedFillId(fill.id);
+                  setSelectedChainKey(buildFillChainKey(fill));
+                }}
+              >
                 <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="font-medium text-primary">
@@ -411,6 +590,136 @@ export default function JournalPage() {
           </div>
         </Panel>
       </div>
+
+      <Panel title="Chain Lot Closes">
+        {selectedChain === null ? (
+          <div className="text-sm text-muted">Select a chain to inspect aggregated FIFO lot consumption.</div>
+        ) : chainDetail.loading ? (
+          <div className="text-sm text-muted">Loading chain lot-close breakdown...</div>
+        ) : chainDetail.error ? (
+          <div className="text-sm text-loss">{chainDetail.error}</div>
+        ) : chainDetail.detail === null ? (
+          <div className="text-sm text-muted">No chain detail available.</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-5">
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="font-mono text-[11px] uppercase text-muted">Closed Qty</div>
+                <div className="mt-1 text-lg font-semibold">{formatNumber(chainDetail.detail.summary.total_closed_quantity, 4)}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="font-mono text-[11px] uppercase text-muted">Realized</div>
+                <div className={`mt-1 text-lg font-semibold ${Number(chainDetail.detail.summary.total_realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"}`}>
+                  ${formatNumber(chainDetail.detail.summary.total_realized_pnl_usd)}
+                </div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="font-mono text-[11px] uppercase text-muted">Lot Slices</div>
+                <div className="mt-1 text-lg font-semibold">{chainDetail.detail.summary.lot_slices_count}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="font-mono text-[11px] uppercase text-muted">Avg Entry</div>
+                <div className="mt-1 text-lg font-semibold">${formatNumber(chainDetail.detail.summary.weighted_average_entry_price)}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="font-mono text-[11px] uppercase text-muted">Avg Exit</div>
+                <div className="mt-1 text-lg font-semibold">${formatNumber(chainDetail.detail.summary.weighted_average_exit_price)}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="font-mono text-[11px] uppercase text-muted">Avg Hold</div>
+                <div className="mt-1 text-lg font-semibold">{formatDurationHours(chainDetail.detail.summary.average_hold_seconds)}</div>
+              </div>
+            </div>
+            {chainDetail.detail.rows.length === 0 ? (
+              <div className="text-sm text-muted">No lot-close rows for this chain. Open-only buy chains usually land here.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="font-mono text-[11px] uppercase text-muted">
+                    <tr>
+                      <th className="pb-2">Lot</th>
+                      <th className="pb-2">Fill</th>
+                      <th className="pb-2">Qty</th>
+                      <th className="pb-2">Entry</th>
+                      <th className="pb-2">Exit</th>
+                      <th className="pb-2">Hold</th>
+                      <th className="pb-2">PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {chainDetail.detail.rows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="py-2 font-mono text-[11px] text-muted">lot #{row.position_lot_id}</td>
+                        <td className="py-2 font-mono text-[11px] text-muted">
+                          {row.fill_client_order_id ?? row.fill_venue_order_id ?? `fill-${row.execution_fill_id}`}
+                        </td>
+                        <td className="py-2">{formatNumber(row.closed_quantity, 4)}</td>
+                        <td className="py-2">${formatNumber(row.lot_entry_price)}</td>
+                        <td className="py-2">${formatNumber(row.fill_exit_price)}</td>
+                        <td className="py-2 font-mono text-[11px] text-muted">{formatDurationHours(row.hold_seconds)}</td>
+                        <td className={`py-2 ${Number(row.realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"}`}>
+                          ${formatNumber(row.realized_pnl_usd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Fill Lot Closes">
+        {selectedFill === null ? (
+          <div className="text-sm text-muted">Select a fill to inspect FIFO lot-close slices.</div>
+        ) : fillDetail.loading ? (
+          <div className="text-sm text-muted">Loading lot-close breakdown...</div>
+        ) : fillDetail.error ? (
+          <div className="text-sm text-loss">{fillDetail.error}</div>
+        ) : fillDetail.lotCloses.length === 0 ? (
+          <div className="text-sm text-muted">No lot-close rows for this fill. Buy fills usually open lots rather than close them.</div>
+        ) : (
+          <div className="space-y-2">
+            <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+              <div className="font-medium text-primary">
+                {selectedFill.symbol} / fill #{selectedFill.id}
+              </div>
+              <div className="mt-1 font-mono text-[11px] text-muted">
+                {selectedFill.client_order_id ?? selectedFill.venue_order_id ?? "no-order-id"}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="font-mono text-[11px] uppercase text-muted">
+                  <tr>
+                    <th className="pb-2">Lot</th>
+                    <th className="pb-2">Qty</th>
+                    <th className="pb-2">Entry</th>
+                    <th className="pb-2">Exit</th>
+                    <th className="pb-2">Hold</th>
+                    <th className="pb-2">PnL</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {fillDetail.lotCloses.map((lotClose) => (
+                    <tr key={lotClose.id}>
+                      <td className="py-2 font-mono text-[11px] text-muted">lot #{lotClose.position_lot_id}</td>
+                      <td className="py-2">{formatNumber(lotClose.closed_quantity, 4)}</td>
+                      <td className="py-2">${formatNumber(lotClose.lot_entry_price)}</td>
+                      <td className="py-2">${formatNumber(lotClose.fill_exit_price)}</td>
+                      <td className="py-2 font-mono text-[11px] text-muted">{formatDurationHours(lotClose.hold_seconds)}</td>
+                      <td className={`py-2 ${Number(lotClose.realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"}`}>
+                        ${formatNumber(lotClose.realized_pnl_usd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Panel>
 
       <Panel title="Replacement Lineages">
         <div className="overflow-x-auto">

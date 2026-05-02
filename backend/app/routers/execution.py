@@ -13,9 +13,12 @@ from app.db import get_session
 from app.db import AsyncSessionLocal
 from app.deps import get_current_user
 from app.models import ExecutionIntent, ExecutionVenueEvent, User
-from app.models import SpotAccountBalance, SpotExecutionFill, SpotSymbolPosition
+from app.models import SpotAccountBalance, SpotExecutionFill, SpotExecutionFillLotClose, SpotPositionLot, SpotSymbolPosition
 from app.routers.risk import resolve_live_spot_exposure
 from app.schemas.execution import (
+    SpotExecutionChainLotCloseRead,
+    SpotExecutionChainLotCloseResponse,
+    SpotExecutionChainLotCloseSummaryRead,
     BybitExecutionPreviewResponse,
     BybitUserStreamStatusResponse,
     ExecutionIntentCancelRequest,
@@ -36,6 +39,7 @@ from app.schemas.execution import (
     ExecutionVenueEventRead,
     SpotAccountBalanceRead,
     SpotExecutionFillChainRead,
+    SpotExecutionFillLotCloseRead,
     SpotExecutionFillRead,
     SpotExecutionFillSummaryRead,
     SpotSymbolPositionRead,
@@ -53,11 +57,15 @@ from services.execution.account_state import SpotAccountStateService
 from services.execution.bybit_runtime import ensure_bybit_runtime_ready, resolve_bybit_execution_runtime
 from services.execution.fill_analytics import (
     IntentLineageOutcomeSummary,
+    parse_order_chain_key,
+    summarize_chain_lot_closes,
     summarize_fill_chains,
     summarize_fill_quality,
     summarize_intent_lineage_outcomes,
     summarize_intent_outcomes,
+    summarize_lot_hold_quality,
     summarize_strategy_quality,
+    summarize_strategy_lot_hold_quality,
 )
 from services.execution.intent_queue import ExecutionIntentQueueService
 from services.execution.bybit_user_stream import BybitUserStreamService
@@ -72,6 +80,12 @@ user_stream_service = BybitUserStreamService(
     queue_service=intent_queue_service,
 )
 account_state_service = SpotAccountStateService()
+
+
+def compute_hold_seconds(opened_at: datetime | None, closed_at: datetime) -> Decimal | None:
+    if opened_at is None:
+        return None
+    return Decimal(str(max((closed_at - opened_at).total_seconds(), 0)))
 
 
 def filter_fill_rows(
@@ -95,12 +109,18 @@ def filter_fill_rows(
 def filter_lineage_rows(
     lineages: list[IntentLineageOutcomeSummary],
     *,
+    root_intent_id: int | None,
+    latest_intent_id: int | None,
     min_lineage_size: int,
     flagged_only: bool,
     min_slippage_bps: Decimal | None,
     underfilled_only: bool,
 ) -> list[IntentLineageOutcomeSummary]:
     filtered = [lineage for lineage in lineages if lineage.lineage_size >= min_lineage_size]
+    if root_intent_id is not None:
+        filtered = [lineage for lineage in filtered if lineage.root_intent_id == root_intent_id]
+    if latest_intent_id is not None:
+        filtered = [lineage for lineage in filtered if lineage.latest_intent_id == latest_intent_id]
     if flagged_only:
         filtered = [
             lineage
@@ -123,6 +143,8 @@ def filter_venue_event_rows(
     events: list[ExecutionVenueEvent],
     *,
     venue: str | None,
+    symbol: str | None,
+    query: str | None,
     reconcile_state: VenueEventState | None,
     status_bucket: VenueStatusBucket | None,
     queue_service: ExecutionIntentQueueService,
@@ -130,6 +152,8 @@ def filter_venue_event_rows(
     filtered = events
     if venue is not None:
         filtered = [event for event in filtered if event.venue == venue]
+    if symbol is not None:
+        filtered = [event for event in filtered if event.symbol == symbol]
     if reconcile_state is not None:
         filtered = [event for event in filtered if event.reconcile_state == reconcile_state]
     if status_bucket is not None:
@@ -138,6 +162,29 @@ def filter_venue_event_rows(
             for event in filtered
             if queue_service.classify_venue_status(event.venue_status) == status_bucket
         ]
+    if query is not None:
+        needle = query.strip().lower()
+        if needle:
+            filtered = [
+                event
+                for event in filtered
+                if any(
+                    needle in value
+                    for value in [
+                        (event.symbol or "").lower(),
+                        (event.client_order_id or "").lower(),
+                        (event.venue_order_id or "").lower(),
+                        (event.event_type or "").lower(),
+                        (event.venue_status or "").lower(),
+                        str(event.payload.get("retMsg", "")).lower()
+                        if isinstance(event.payload, dict)
+                        else "",
+                        str(event.payload.get("retCode", "")).lower()
+                        if isinstance(event.payload, dict)
+                        else "",
+                    ]
+                )
+            ]
     return filtered
 
 
@@ -531,6 +578,7 @@ async def list_spot_symbol_positions(
 async def list_spot_execution_fills(
     symbol: str | None = Query(default=None, max_length=32),
     strategy: str | None = Query(default=None, max_length=64),
+    execution_intent_id: int | None = Query(default=None, ge=1),
     pnl_filter: str | None = Query(default=None, pattern="^(winning|losing|flat)$"),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
@@ -542,6 +590,8 @@ async def list_spot_execution_fills(
     query = select(SpotExecutionFill).order_by(SpotExecutionFill.filled_at.desc()).offset(offset).limit(limit)
     if symbol is not None:
         query = query.where(SpotExecutionFill.symbol == symbol.upper())
+    if execution_intent_id is not None:
+        query = query.where(SpotExecutionFill.execution_intent_id == execution_intent_id)
     if start_at is not None:
         query = query.where(SpotExecutionFill.filled_at >= start_at)
     if end_at is not None:
@@ -574,10 +624,149 @@ async def list_spot_execution_fills(
     ]
 
 
+@router.get("/account/fills/{fill_id}/lot-closes", response_model=list[SpotExecutionFillLotCloseRead])
+async def list_spot_execution_fill_lot_closes(
+    fill_id: int,
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[SpotExecutionFillLotCloseRead]:
+    lot_closes = list(
+        (
+            await session.scalars(
+                select(SpotExecutionFillLotClose)
+                .where(SpotExecutionFillLotClose.execution_fill_id == fill_id)
+                .order_by(SpotExecutionFillLotClose.closed_at.asc(), SpotExecutionFillLotClose.id.asc())
+            )
+        ).all()
+    )
+    lot_by_id = {
+        int(lot.id): lot
+        for lot in (
+            await session.scalars(
+                select(SpotPositionLot).where(
+                    SpotPositionLot.id.in_([int(item.position_lot_id) for item in lot_closes])
+                )
+            )
+        ).all()
+    } if lot_closes else {}
+    rows: list[SpotExecutionFillLotCloseRead] = []
+    for item in lot_closes:
+        lot = lot_by_id.get(int(item.position_lot_id))
+        lot_opened_at = lot.opened_at if lot is not None else None
+        rows.append(
+            SpotExecutionFillLotCloseRead(
+                id=int(item.id),
+                execution_fill_id=int(item.execution_fill_id),
+                position_lot_id=int(item.position_lot_id),
+                symbol=item.symbol,
+                closed_quantity=item.closed_quantity,
+                lot_entry_price=item.lot_entry_price,
+                fill_exit_price=item.fill_exit_price,
+                realized_pnl_usd=item.realized_pnl_usd,
+                lot_opened_at=lot_opened_at,
+                hold_seconds=compute_hold_seconds(lot_opened_at, item.closed_at),
+                closed_at=item.closed_at,
+            )
+        )
+    return rows
+
+
+@router.get("/account/fills/chains/{chain_key}/lot-closes", response_model=SpotExecutionChainLotCloseResponse)
+async def summarize_spot_execution_chain_lot_closes(
+    chain_key: str,
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> SpotExecutionChainLotCloseResponse:
+    parsed_chain = parse_order_chain_key(chain_key)
+    if parsed_chain is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown chain key")
+    chain_type, chain_value = parsed_chain
+    fill_query = select(SpotExecutionFill).order_by(SpotExecutionFill.filled_at.asc(), SpotExecutionFill.id.asc())
+    if chain_type == "client":
+        fill_query = fill_query.where(SpotExecutionFill.client_order_id == chain_value)
+    elif chain_type == "venue":
+        fill_query = fill_query.where(SpotExecutionFill.venue_order_id == chain_value)
+    else:
+        fill_query = fill_query.where(SpotExecutionFill.id == chain_value)
+    fills = list((await session.scalars(fill_query)).all())
+    if not fills:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="chain not found")
+
+    fill_ids = [int(fill.id) for fill in fills]
+    lot_close_rows = list(
+        (
+            await session.scalars(
+                select(SpotExecutionFillLotClose)
+                .where(SpotExecutionFillLotClose.execution_fill_id.in_(fill_ids))
+                .order_by(SpotExecutionFillLotClose.closed_at.asc(), SpotExecutionFillLotClose.id.asc())
+            )
+        ).all()
+    )
+    fill_by_id = {int(fill.id): fill for fill in fills}
+    lot_by_id = {
+        int(lot.id): lot
+        for lot in (
+            await session.scalars(
+                select(SpotPositionLot).where(
+                    SpotPositionLot.id.in_([int(item.position_lot_id) for item in lot_close_rows])
+                )
+            )
+        ).all()
+    } if lot_close_rows else {}
+    summary = summarize_chain_lot_closes(
+        chain_key,
+        fills,
+        lot_close_rows,
+        {lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+    )
+    if summary is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="chain not found")
+    return SpotExecutionChainLotCloseResponse(
+        summary=SpotExecutionChainLotCloseSummaryRead(
+            chain_key=summary.chain_key,
+            symbol=summary.symbol,
+            fills_count=summary.fills_count,
+            lot_slices_count=summary.lot_slices_count,
+            lots_count=summary.lots_count,
+            total_closed_quantity=summary.total_closed_quantity,
+            total_realized_pnl_usd=summary.total_realized_pnl_usd,
+            weighted_average_entry_price=summary.weighted_average_entry_price,
+            weighted_average_exit_price=summary.weighted_average_exit_price,
+            average_hold_seconds=summary.average_hold_seconds,
+            max_hold_seconds=summary.max_hold_seconds,
+            opened_at=summary.opened_at,
+            closed_at=summary.closed_at,
+        ),
+        rows=[
+            SpotExecutionChainLotCloseRead(
+                id=int(item.id),
+                execution_fill_id=int(item.execution_fill_id),
+                position_lot_id=int(item.position_lot_id),
+                symbol=item.symbol,
+                closed_quantity=item.closed_quantity,
+                lot_entry_price=item.lot_entry_price,
+                fill_exit_price=item.fill_exit_price,
+                realized_pnl_usd=item.realized_pnl_usd,
+                lot_opened_at=(lot_by_id[int(item.position_lot_id)].opened_at if int(item.position_lot_id) in lot_by_id else None),
+                hold_seconds=compute_hold_seconds(
+                    (lot_by_id[int(item.position_lot_id)].opened_at if int(item.position_lot_id) in lot_by_id else None),
+                    item.closed_at,
+                ),
+                closed_at=item.closed_at,
+                fill_client_order_id=fill_by_id[int(item.execution_fill_id)].client_order_id,
+                fill_venue_order_id=fill_by_id[int(item.execution_fill_id)].venue_order_id,
+                fill_source_strategy=fill_by_id[int(item.execution_fill_id)].source_strategy,
+            )
+            for item in lot_close_rows
+        ],
+    )
+
+
 @router.get("/account/fills/export")
 async def export_spot_execution_fills_csv(
     symbol: str | None = Query(default=None, max_length=32),
     strategy: str | None = Query(default=None, max_length=64),
+    execution_intent_id: int | None = Query(default=None, ge=1),
     pnl_filter: str | None = Query(default=None, pattern="^(winning|losing|flat)$"),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
@@ -589,6 +778,8 @@ async def export_spot_execution_fills_csv(
     query = select(SpotExecutionFill).order_by(SpotExecutionFill.filled_at.desc()).offset(offset).limit(limit)
     if symbol is not None:
         query = query.where(SpotExecutionFill.symbol == symbol.upper())
+    if execution_intent_id is not None:
+        query = query.where(SpotExecutionFill.execution_intent_id == execution_intent_id)
     if start_at is not None:
         query = query.where(SpotExecutionFill.filled_at >= start_at)
     if end_at is not None:
@@ -644,6 +835,7 @@ async def export_spot_execution_fills_csv(
 async def summarize_spot_execution_fills(
     symbol: str | None = Query(default=None, max_length=32),
     strategy: str | None = Query(default=None, max_length=64),
+    execution_intent_id: int | None = Query(default=None, ge=1),
     pnl_filter: str | None = Query(default=None, pattern="^(winning|losing|flat)$"),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
@@ -656,6 +848,8 @@ async def summarize_spot_execution_fills(
     query = select(SpotExecutionFill).order_by(SpotExecutionFill.filled_at.desc()).limit(limit)
     if symbol is not None:
         query = query.where(SpotExecutionFill.symbol == symbol.upper())
+    if execution_intent_id is not None:
+        query = query.where(SpotExecutionFill.execution_intent_id == execution_intent_id)
     if start_at is not None:
         query = query.where(SpotExecutionFill.filled_at >= start_at)
     if end_at is not None:
@@ -665,9 +859,42 @@ async def summarize_spot_execution_fills(
         strategy=strategy,
         pnl_filter=pnl_filter,
     )
+    fill_ids = [int(fill.id) for fill in fills]
+    lot_close_rows = list(
+        (
+            await session.scalars(
+                select(SpotExecutionFillLotClose)
+                .where(SpotExecutionFillLotClose.execution_fill_id.in_(fill_ids))
+                .order_by(SpotExecutionFillLotClose.closed_at.asc(), SpotExecutionFillLotClose.id.asc())
+            )
+        ).all()
+    ) if fill_ids else []
+    lot_by_id = {
+        int(lot.id): lot
+        for lot in (
+            await session.scalars(
+                select(SpotPositionLot).where(
+                    SpotPositionLot.id.in_([int(item.position_lot_id) for item in lot_close_rows])
+                )
+            )
+        ).all()
+    } if lot_close_rows else {}
     summary = summarize_fill_quality(fills)
     chains = summarize_fill_chains(fills)[recent_chains_offset : recent_chains_offset + recent_chains_limit]
     strategy_breakdown = summarize_strategy_quality(fills)
+    hold_summary = summarize_lot_hold_quality(
+        lot_close_rows,
+        strategy_by_fill_id={int(fill.id): fill.source_strategy for fill in fills},
+        lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+    )
+    strategy_hold_breakdown = {
+        item.source_strategy: item
+        for item in summarize_strategy_lot_hold_quality(
+            lot_close_rows,
+            strategy_by_fill_id={int(fill.id): fill.source_strategy for fill in fills},
+            lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+        )
+    }
     return SpotExecutionFillSummaryRead(
         fills_count=summary.fills_count,
         chains_count=summary.chains_count,
@@ -682,6 +909,12 @@ async def summarize_spot_execution_fills(
         average_realized_pnl_per_fill_usd=summary.average_realized_pnl_per_fill_usd,
         gross_adverse_slippage_cost_usd=summary.gross_adverse_slippage_cost_usd,
         average_adverse_slippage_bps=summary.average_adverse_slippage_bps,
+        lot_closes_count=hold_summary.lot_closes_count,
+        average_hold_seconds=hold_summary.average_hold_seconds,
+        max_hold_seconds=hold_summary.max_hold_seconds,
+        average_realized_pnl_per_lot_close_usd=hold_summary.average_realized_pnl_per_lot_close_usd,
+        short_hold_realized_pnl_usd=hold_summary.short_hold_realized_pnl_usd,
+        long_hold_realized_pnl_usd=hold_summary.long_hold_realized_pnl_usd,
         strategy_breakdown=[
             {
                 "source_strategy": item.source_strategy,
@@ -693,6 +926,36 @@ async def summarize_spot_execution_fills(
                 "gross_adverse_slippage_cost_usd": item.gross_adverse_slippage_cost_usd,
                 "average_adverse_slippage_bps": item.average_adverse_slippage_bps,
                 "gross_underfill_notional_usd": item.gross_underfill_notional_usd,
+                "lot_closes_count": (
+                    strategy_hold_breakdown[item.source_strategy].lot_closes_count
+                    if item.source_strategy in strategy_hold_breakdown
+                    else 0
+                ),
+                "average_hold_seconds": (
+                    strategy_hold_breakdown[item.source_strategy].average_hold_seconds
+                    if item.source_strategy in strategy_hold_breakdown
+                    else None
+                ),
+                "max_hold_seconds": (
+                    strategy_hold_breakdown[item.source_strategy].max_hold_seconds
+                    if item.source_strategy in strategy_hold_breakdown
+                    else None
+                ),
+                "average_realized_pnl_per_lot_close_usd": (
+                    strategy_hold_breakdown[item.source_strategy].average_realized_pnl_per_lot_close_usd
+                    if item.source_strategy in strategy_hold_breakdown
+                    else Decimal("0")
+                ),
+                "short_hold_realized_pnl_usd": (
+                    strategy_hold_breakdown[item.source_strategy].short_hold_realized_pnl_usd
+                    if item.source_strategy in strategy_hold_breakdown
+                    else Decimal("0")
+                ),
+                "long_hold_realized_pnl_usd": (
+                    strategy_hold_breakdown[item.source_strategy].long_hold_realized_pnl_usd
+                    if item.source_strategy in strategy_hold_breakdown
+                    else Decimal("0")
+                ),
             }
             for item in strategy_breakdown
         ],
@@ -724,6 +987,7 @@ async def summarize_spot_execution_fills(
 async def export_spot_execution_fill_chains_csv(
     symbol: str | None = Query(default=None, max_length=32),
     strategy: str | None = Query(default=None, max_length=64),
+    execution_intent_id: int | None = Query(default=None, ge=1),
     pnl_filter: str | None = Query(default=None, pattern="^(winning|losing|flat)$"),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
@@ -736,6 +1000,8 @@ async def export_spot_execution_fill_chains_csv(
     query = select(SpotExecutionFill).order_by(SpotExecutionFill.filled_at.desc()).limit(limit)
     if symbol is not None:
         query = query.where(SpotExecutionFill.symbol == symbol.upper())
+    if execution_intent_id is not None:
+        query = query.where(SpotExecutionFill.execution_intent_id == execution_intent_id)
     if start_at is not None:
         query = query.where(SpotExecutionFill.filled_at >= start_at)
     if end_at is not None:
@@ -794,6 +1060,7 @@ async def export_spot_execution_fill_chains_csv(
 async def list_execution_intent_outcomes(
     strategy: str | None = Query(default=None, max_length=64),
     status_filter: str | None = Query(default=None, alias="status"),
+    execution_intent_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=500),
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -803,6 +1070,8 @@ async def list_execution_intent_outcomes(
         query = query.where(ExecutionIntent.source_strategy == strategy)
     if status_filter is not None:
         query = query.where(ExecutionIntent.status == status_filter)
+    if execution_intent_id is not None:
+        query = query.where(ExecutionIntent.id == execution_intent_id)
     intents = list((await session.scalars(query)).all())
     intent_ids = [int(intent.id) for intent in intents if intent.id is not None]
     fills: list[SpotExecutionFill] = []
@@ -850,6 +1119,8 @@ async def list_execution_intent_outcomes(
 async def list_execution_intent_lineage_outcomes(
     strategy: str | None = Query(default=None, max_length=64),
     status_filter: str | None = Query(default=None, alias="status"),
+    root_intent_id: int | None = Query(default=None, ge=1),
+    latest_intent_id: int | None = Query(default=None, ge=1),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
     min_lineage_size: int = Query(default=1, ge=1, le=50),
@@ -883,9 +1154,36 @@ async def list_execution_intent_lineage_outcomes(
                 )
             ).all()
         )
+    fill_ids = [int(fill.id) for fill in fills if fill.id is not None]
+    lot_closes = list(
+        (
+            await session.scalars(
+                select(SpotExecutionFillLotClose)
+                .where(SpotExecutionFillLotClose.execution_fill_id.in_(fill_ids))
+                .order_by(SpotExecutionFillLotClose.closed_at.desc(), SpotExecutionFillLotClose.id.desc())
+            )
+        ).all()
+    ) if fill_ids else []
+    lot_by_id = {
+        int(lot.id): lot
+        for lot in (
+            await session.scalars(
+                select(SpotPositionLot).where(
+                    SpotPositionLot.id.in_([int(item.position_lot_id) for item in lot_closes])
+                )
+            )
+        ).all()
+    } if lot_closes else {}
 
     lineages = filter_lineage_rows(
-        summarize_intent_lineage_outcomes(intents, fills),
+        summarize_intent_lineage_outcomes(
+            intents,
+            fills,
+            lot_closes=lot_closes,
+            lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+        ),
+        root_intent_id=root_intent_id,
+        latest_intent_id=latest_intent_id,
         min_lineage_size=min_lineage_size,
         flagged_only=flagged_only,
         min_slippage_bps=min_slippage_bps,
@@ -914,6 +1212,10 @@ async def list_execution_intent_lineage_outcomes(
             adverse_slippage_bps=item.adverse_slippage_bps,
             slippage_cost_usd=item.slippage_cost_usd,
             underfill_notional_usd=item.underfill_notional_usd,
+            average_hold_seconds=item.average_hold_seconds,
+            max_hold_seconds=item.max_hold_seconds,
+            short_hold_realized_pnl_usd=item.short_hold_realized_pnl_usd,
+            long_hold_realized_pnl_usd=item.long_hold_realized_pnl_usd,
             last_fill_at=item.last_fill_at,
         )
         for item in lineages
@@ -924,6 +1226,8 @@ async def list_execution_intent_lineage_outcomes(
 async def export_execution_intent_lineages_csv(
     strategy: str | None = Query(default=None, max_length=64),
     status_filter: str | None = Query(default=None, alias="status"),
+    root_intent_id: int | None = Query(default=None, ge=1),
+    latest_intent_id: int | None = Query(default=None, ge=1),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
     min_lineage_size: int = Query(default=1, ge=1, le=50),
@@ -957,8 +1261,35 @@ async def export_execution_intent_lineages_csv(
                 )
             ).all()
         )
+    fill_ids = [int(fill.id) for fill in fills if fill.id is not None]
+    lot_closes = list(
+        (
+            await session.scalars(
+                select(SpotExecutionFillLotClose)
+                .where(SpotExecutionFillLotClose.execution_fill_id.in_(fill_ids))
+                .order_by(SpotExecutionFillLotClose.closed_at.desc(), SpotExecutionFillLotClose.id.desc())
+            )
+        ).all()
+    ) if fill_ids else []
+    lot_by_id = {
+        int(lot.id): lot
+        for lot in (
+            await session.scalars(
+                select(SpotPositionLot).where(
+                    SpotPositionLot.id.in_([int(item.position_lot_id) for item in lot_closes])
+                )
+            )
+        ).all()
+    } if lot_closes else {}
     lineages = filter_lineage_rows(
-        summarize_intent_lineage_outcomes(intents, fills),
+        summarize_intent_lineage_outcomes(
+            intents,
+            fills,
+            lot_closes=lot_closes,
+            lot_opened_at={lot_id: lot.opened_at for lot_id, lot in lot_by_id.items()},
+        ),
+        root_intent_id=root_intent_id,
+        latest_intent_id=latest_intent_id,
         min_lineage_size=min_lineage_size,
         flagged_only=flagged_only,
         min_slippage_bps=min_slippage_bps,
@@ -988,6 +1319,10 @@ async def export_execution_intent_lineages_csv(
             "adverse_slippage_bps",
             "slippage_cost_usd",
             "underfill_notional_usd",
+            "average_hold_seconds",
+            "max_hold_seconds",
+            "short_hold_realized_pnl_usd",
+            "long_hold_realized_pnl_usd",
             "last_fill_at",
         ],
         [
@@ -1013,6 +1348,10 @@ async def export_execution_intent_lineages_csv(
                 item.adverse_slippage_bps,
                 item.slippage_cost_usd,
                 item.underfill_notional_usd,
+                item.average_hold_seconds,
+                item.max_hold_seconds,
+                item.short_hold_realized_pnl_usd,
+                item.long_hold_realized_pnl_usd,
                 item.last_fill_at.isoformat() if item.last_fill_at is not None else None,
             ]
             for item in lineages
@@ -1192,6 +1531,8 @@ async def list_execution_venue_events(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     venue: str | None = Query(default=None, max_length=64),
+    symbol: str | None = Query(default=None, max_length=32),
+    query: str | None = Query(default=None, max_length=128),
     reconcile_state: VenueEventState | None = Query(default=None),
     status_bucket: VenueStatusBucket | None = Query(default=None),
     _: User = Depends(get_current_user),
@@ -1209,6 +1550,8 @@ async def list_execution_venue_events(
     filtered = filter_venue_event_rows(
         events,
         venue=venue,
+        symbol=symbol,
+        query=query,
         reconcile_state=reconcile_state,
         status_bucket=status_bucket,
         queue_service=intent_queue_service,
@@ -1222,6 +1565,8 @@ async def export_execution_venue_events(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     venue: str | None = Query(default=None, max_length=64),
+    symbol: str | None = Query(default=None, max_length=32),
+    query: str | None = Query(default=None, max_length=128),
     reconcile_state: VenueEventState | None = Query(default=None),
     status_bucket: VenueStatusBucket | None = Query(default=None),
     _: User = Depends(get_current_user),
@@ -1239,6 +1584,8 @@ async def export_execution_venue_events(
     filtered = filter_venue_event_rows(
         events,
         venue=venue,
+        symbol=symbol,
+        query=query,
         reconcile_state=reconcile_state,
         status_bucket=status_bucket,
         queue_service=intent_queue_service,

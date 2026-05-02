@@ -234,6 +234,45 @@ class SpotExecutionFill(Base):
     source_event: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class SpotPositionLot(Base):
+    __tablename__ = "spot_position_lots"
+    __table_args__ = (
+        Index("ix_spot_position_lots_symbol_opened_at", "symbol", "opened_at"),
+        Index("ix_spot_position_lots_remaining_quantity", "remaining_quantity"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    execution_intent_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    source_strategy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    venue_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(28, 12))
+    original_quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18))
+    remaining_quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18))
+    source_event: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class SpotExecutionFillLotClose(Base):
+    __tablename__ = "spot_execution_fill_lot_closes"
+    __table_args__ = (
+        Index("ix_spot_execution_fill_lot_closes_fill_id", "execution_fill_id"),
+        Index("ix_spot_execution_fill_lot_closes_lot_id", "position_lot_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    execution_fill_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    position_lot_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    closed_quantity: Mapped[Decimal] = mapped_column(Numeric(36, 18))
+    lot_entry_price: Mapped[Decimal] = mapped_column(Numeric(28, 12))
+    fill_exit_price: Mapped[Decimal] = mapped_column(Numeric(28, 12))
+    realized_pnl_usd: Mapped[Decimal] = mapped_column(Numeric(36, 18), default=Decimal("0"))
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class DailyDigestRun(Base):
     __tablename__ = "daily_digest_runs"
     __table_args__ = (

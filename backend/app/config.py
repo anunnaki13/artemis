@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     bybit_ws_private_testnet_base_url: str = "wss://stream-testnet.bybit.com/v5/private"
     bybit_ws_public_spot_testnet_base_url: str = "wss://stream-testnet.bybit.com/v5/public/spot"
     bybit_account_type: str = "UNIFIED"
+    market_stream_autostart_symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT"
+    market_stream_autostart_interval: str = "1"
     market_data_poll_interval_seconds: int = 30
     orderbook_persist_interval_seconds: int = 5
     orderbook_snapshot_depth_levels: int = 20

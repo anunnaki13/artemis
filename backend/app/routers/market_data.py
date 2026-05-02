@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -140,13 +141,36 @@ async def list_candles(
     limit: int = Query(default=200, ge=1, le=1000),
     session: AsyncSession = Depends(get_session),
 ) -> list[Candle]:
+    normalized_symbol = symbol.upper()
     query = (
         select(Candle)
-        .where(Candle.symbol == symbol.upper(), Candle.timeframe == interval)
+        .where(Candle.symbol == normalized_symbol, Candle.timeframe == interval)
         .order_by(Candle.open_time.desc())
         .limit(limit)
     )
-    return list((await session.scalars(query)).all())
+    candles = list((await session.scalars(query)).all())
+
+    latest_open_time = candles[0].open_time if candles else None
+    now = datetime.now(UTC)
+    staleness_threshold = now - timedelta(minutes=3)
+    should_refresh = latest_open_time is None or latest_open_time < staleness_threshold or len(candles) < min(limit, 30)
+
+    if should_refresh:
+        client = BybitMarketDataClient()
+        klines = await client.klines(normalized_symbol, interval, limit, category="spot")
+        for kline in klines:
+            values = parse_kline(normalized_symbol, interval, kline)
+            statement = insert(Candle).values(**values)
+            await session.execute(
+                statement.on_conflict_do_update(
+                    constraint="uq_candles_symbol_timeframe_open_time",
+                    set_=values,
+                )
+            )
+        await session.commit()
+        candles = list((await session.scalars(query)).all())
+
+    return candles
 
 
 @router.get("/stream/status", response_model=MarketStreamStatusResponse)

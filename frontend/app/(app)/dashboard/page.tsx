@@ -6,6 +6,7 @@ import { AlertTriangle, Crosshair, LockKeyhole, Pause, RadioTower, Shield } from
 import { KpiCard } from "@/components/kpi/kpi-card";
 import {
   buildApiUrl,
+  type CandleResponse,
   type DailyDigestArtifactResponse,
   type DailyDigestPreviewResponse,
   type DailyDigestSeriesPointResponse,
@@ -15,6 +16,7 @@ import {
   type MarketStreamStatusResponse,
   type OrderBookResponse,
   type UserStreamStatusResponse,
+  getCandles,
   getBybitUserStreamStatus,
   getDailyDigestPreview,
   getDashboardSummary,
@@ -36,6 +38,7 @@ type DashboardState = {
   marketStream: MarketStreamStatusResponse | null;
   userStream: UserStreamStatusResponse | null;
   orderbook: OrderBookResponse | null;
+  candles: CandleResponse[];
   liquidityHistory: LiquidityPointResponse[];
   intents: ExecutionIntentResponse[];
   error: string | null;
@@ -44,6 +47,8 @@ type DashboardState = {
 
 const DIGEST_RANGE_OPTIONS = [7, 30, 90] as const;
 const DIGEST_COMPARE_OPTIONS = ["fills", "lineage_alerts", "top_strategy_pnl"] as const;
+const PRICE_STREAM_SYMBOL_OPTIONS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
+const PRICE_STREAM_INTERVAL_OPTIONS = ["1m", "5m", "15m"] as const;
 
 function Panel({
   title,
@@ -105,12 +110,13 @@ function formatTimestamp(value: string | null | undefined) {
   });
 }
 
-function buildSparkPath(points: LiquidityPointResponse[]) {
-  if (points.length === 0) {
+function buildPriceSparkPath(candles: CandleResponse[]) {
+  if (candles.length === 0) {
     return "";
   }
-  const values = points
-    .map((point) => Number(point.metrics.mid_price ?? point.metrics.best_bid ?? 0))
+  const values = [...candles]
+    .sort((left, right) => new Date(left.open_time).getTime() - new Date(right.open_time).getTime())
+    .map((candle) => Number(candle.close))
     .filter((value) => Number.isFinite(value) && value > 0);
   if (values.length === 0) {
     return "";
@@ -198,6 +204,8 @@ function exportDigestSeriesCsv(options: {
 export default function DashboardPage() {
   const [digestRangeDays, setDigestRangeDays] = useState<(typeof DIGEST_RANGE_OPTIONS)[number]>(30);
   const [digestCompareMetric, setDigestCompareMetric] = useState<(typeof DIGEST_COMPARE_OPTIONS)[number]>("fills");
+  const [priceStreamSymbol, setPriceStreamSymbol] = useState<(typeof PRICE_STREAM_SYMBOL_OPTIONS)[number]>("BTCUSDT");
+  const [priceStreamInterval, setPriceStreamInterval] = useState<(typeof PRICE_STREAM_INTERVAL_OPTIONS)[number]>("1m");
   const [digestStartAt, setDigestStartAt] = useState("");
   const [digestEndAt, setDigestEndAt] = useState("");
   const [digestFlaggedOnly, setDigestFlaggedOnly] = useState(false);
@@ -213,6 +221,7 @@ export default function DashboardPage() {
     marketStream: null,
     userStream: null,
     orderbook: null,
+    candles: [],
     liquidityHistory: [],
     intents: [],
     error: null,
@@ -242,12 +251,13 @@ export default function DashboardPage() {
             })
           : listDailyDigestRunsFiltered({ days: digestRangeDays, flaggedOnly: digestFlaggedOnly, limit: 365 });
       try {
-        const [summaryResult, marketStreamResult, userStreamResult, orderbookResult, liquidityHistoryResult, intentsResult, digestsResult, digestSeriesResult, digestRunsResult] = await Promise.allSettled([
+        const [summaryResult, marketStreamResult, userStreamResult, orderbookResult, candlesResult, liquidityHistoryResult, intentsResult, digestsResult, digestSeriesResult, digestRunsResult] = await Promise.allSettled([
           getDashboardSummary(),
           getMarketStreamStatus(),
           getBybitUserStreamStatus(),
-          getOrderbook("BTCUSDT", 7),
-          getLiquidityHistory("BTCUSDT", 24),
+          getOrderbook(priceStreamSymbol, 7),
+          getCandles(priceStreamSymbol, priceStreamInterval, 60),
+          getLiquidityHistory(priceStreamSymbol, 24),
           getExecutionIntents(8),
           listDailyDigestArtifacts(6),
           digestSeriesRequest,
@@ -267,6 +277,7 @@ export default function DashboardPage() {
           marketStream: marketStreamResult.status === "fulfilled" ? marketStreamResult.value : null,
           userStream: userStreamResult.status === "fulfilled" ? userStreamResult.value : null,
           orderbook: orderbookResult.status === "fulfilled" ? orderbookResult.value : null,
+          candles: candlesResult.status === "fulfilled" ? candlesResult.value : [],
           liquidityHistory: liquidityHistoryResult.status === "fulfilled" ? liquidityHistoryResult.value : [],
           intents: intentsResult.status === "fulfilled" ? intentsResult.value : [],
           error: null,
@@ -293,7 +304,7 @@ export default function DashboardPage() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [digestRangeDays, digestStartAt, digestEndAt, digestFlaggedOnly]);
+  }, [digestRangeDays, digestStartAt, digestEndAt, digestFlaggedOnly, priceStreamSymbol, priceStreamInterval]);
 
   useEffect(() => {
     const reportDate =
@@ -371,7 +382,19 @@ export default function DashboardPage() {
   const marketStream = state.marketStream;
   const userStream = state.userStream;
   const orderbook = state.orderbook;
-  const sparkPath = buildSparkPath(state.liquidityHistory);
+  const sparkPath = buildPriceSparkPath(state.candles);
+  const latestCandle = [...state.candles].sort(
+    (left, right) => new Date(right.open_time).getTime() - new Date(left.open_time).getTime()
+  )[0] ?? null;
+  const previousCandle = [...state.candles].sort(
+    (left, right) => new Date(right.open_time).getTime() - new Date(left.open_time).getTime()
+  )[1] ?? null;
+  const latestClose = latestCandle ? Number(latestCandle.close) : null;
+  const previousClose = previousCandle ? Number(previousCandle.close) : null;
+  const candleDelta =
+    latestClose !== null && previousClose !== null && previousClose !== 0
+      ? ((latestClose - previousClose) / previousClose) * 100
+      : null;
   const executionCounts = summary?.execution_counts ?? {};
   const activeIntents = (executionCounts.approved ?? 0) + (executionCounts.dispatching ?? 0);
   const utcNow = new Date().toLocaleTimeString("en-GB", { hour12: false, timeZone: "UTC" });
@@ -424,6 +447,22 @@ export default function DashboardPage() {
     null;
 
   const riskRows = [
+    {
+      label: "Bybit runtime",
+      status: summary?.bybit_runtime?.configured
+        ? summary.bybit_runtime.live_ready
+          ? summary.bybit_runtime.testnet
+            ? "TESTNET READY"
+            : "MAINNET READY"
+          : "GUARDRAILED"
+        : "UNCONFIGURED",
+      tone: summary?.bybit_runtime?.configured
+        ? summary.bybit_runtime.live_ready
+          ? "text-profit"
+          : "text-warning"
+        : "text-loss",
+      Icon: Shield
+    },
     {
       label: "Market stream",
       status: marketStream?.running ? "RUNNING" : "STOPPED",
@@ -483,6 +522,17 @@ export default function DashboardPage() {
               <span className="rounded border border-warning/30 bg-warning/10 px-2 py-1 text-warning">
                 EXEC {summary?.execution_status ?? "IDLE"}
               </span>
+              <span
+                className={`rounded border px-2 py-1 ${
+                  summary?.bybit_runtime?.configured
+                    ? summary.bybit_runtime.live_ready
+                      ? "border-profit/30 bg-profit/10 text-profit"
+                      : "border-warning/30 bg-warning/10 text-warning"
+                    : "border-loss/30 bg-loss/10 text-loss"
+                }`}
+              >
+                BYBIT {summary?.bybit_runtime?.configured ? (summary.bybit_runtime.live_ready ? "READY" : "CHECK") : "MISSING"}
+              </span>
             </div>
           </div>
           {state.error ? (
@@ -492,20 +542,36 @@ export default function DashboardPage() {
           ) : null}
         </div>
         <div className="market-panel rounded px-4 py-3">
-          <div className="grid grid-cols-3 gap-3 font-mono text-[11px]">
+        <div className="grid grid-cols-3 gap-3 font-mono text-[11px]">
             <div>
               <div className="text-muted">UTC</div>
               <div className="mt-1 text-primary">{utcNow}</div>
             </div>
             <div>
-              <div className="text-muted">BTCUSDT SPREAD</div>
+              <div className="text-muted">{priceStreamSymbol} SPREAD</div>
               <div className="mt-1 text-profit">
-                {formatNumber(summary?.focus_liquidity?.spread_bps, 2)} bps
+                {formatNumber(orderbook?.metrics.spread_bps ?? summary?.focus_liquidity?.spread_bps, 2)} bps
               </div>
             </div>
             <div>
               <div className="text-muted">UPDATED</div>
               <div className="mt-1 text-warning">{formatTimestamp(state.updatedAt)}</div>
+            </div>
+          </div>
+          <div className="mt-3 rounded border border-white/10 bg-black/25 px-3 py-2 font-mono text-[11px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-muted">BYBIT RUNTIME</span>
+              <span className={summary?.bybit_runtime?.live_ready ? "text-profit" : summary?.bybit_runtime?.configured ? "text-warning" : "text-loss"}>
+                {summary?.bybit_runtime?.configured
+                  ? summary.bybit_runtime.live_ready
+                    ? `${summary.bybit_runtime.testnet ? "TESTNET" : "MAINNET"} / ${summary.bybit_runtime.account_type ?? "UNKNOWN"}`
+                    : "configured with guards pending"
+                  : "not configured"}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-muted">
+              <span>transport {summary?.bybit_runtime?.live_transport_enabled ? "live-enabled" : "safe-disabled"}</span>
+              <span>{summary?.bybit_runtime?.issues?.[0] ?? "no runtime issues"}</span>
             </div>
           </div>
         </div>
@@ -543,7 +609,41 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr_360px]">
-        <Panel title="Liquidity / Mid Price Stream" action="btc microstructure">
+        <Panel title={`${priceStreamSymbol} Candle Stream`} action={`${priceStreamInterval} close series`}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+              {PRICE_STREAM_SYMBOL_OPTIONS.map((symbol) => (
+                <button
+                  key={symbol}
+                  type="button"
+                  onClick={() => setPriceStreamSymbol(symbol)}
+                  className={`rounded border px-2 py-1 ${
+                    priceStreamSymbol === symbol
+                      ? "border-cyan/40 bg-cyan/10 text-cyan"
+                      : "border-white/10 bg-white/[0.03] text-muted"
+                  }`}
+                >
+                  {symbol}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 font-mono text-[11px]">
+              {PRICE_STREAM_INTERVAL_OPTIONS.map((interval) => (
+                <button
+                  key={interval}
+                  type="button"
+                  onClick={() => setPriceStreamInterval(interval)}
+                  className={`rounded border px-2 py-1 ${
+                    priceStreamInterval === interval
+                      ? "border-profit/40 bg-profit/10 text-profit"
+                      : "border-white/10 bg-white/[0.03] text-muted"
+                  }`}
+                >
+                  {interval}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="relative h-[292px] overflow-hidden rounded border border-white/10 bg-black/35">
             <svg className="absolute inset-0 h-full w-full" viewBox="0 0 900 280" preserveAspectRatio="none">
               {Array.from({ length: 8 }).map((_, index) => (
@@ -556,8 +656,14 @@ export default function DashboardPage() {
               <path d="M0 232 L900 232" stroke="#49c6ff" strokeDasharray="8 8" strokeOpacity="0.5" />
             </svg>
             <div className="absolute left-3 top-3 rounded border border-white/10 bg-black/70 px-3 py-2 font-mono text-[11px]">
-              <div className="text-muted">MID / DEPTH SNAPSHOT</div>
-              <div className="mt-1 text-profit">
+              <div className="text-muted">LAST CLOSE / BAR DELTA</div>
+              <div className={`mt-1 ${candleDelta !== null && candleDelta < 0 ? "text-loss" : "text-profit"}`}>
+                {formatNumber(latestCandle?.close, 2)} / {candleDelta === null ? "--" : `${formatNumber(candleDelta, 2)}%`}
+              </div>
+            </div>
+            <div className="absolute right-3 top-3 rounded border border-white/10 bg-black/70 px-3 py-2 font-mono text-[11px]">
+              <div className="text-muted">DEPTH SNAPSHOT</div>
+              <div className="mt-1 text-cyan">
                 {formatNumber(orderbook?.metrics.mid_price, 2)} / {formatCompact(orderbook?.metrics.bid_depth_notional_0p5pct)} bid
               </div>
             </div>
@@ -700,6 +806,7 @@ export default function DashboardPage() {
                   <th className="px-2 py-2 text-right font-normal">WIN RATE</th>
                   <th className="px-2 py-2 text-right font-normal">REALIZED</th>
                   <th className="px-2 py-2 text-right font-normal">SLIP COST</th>
+                  <th className="px-2 py-2 text-right font-normal">AVG HOLD</th>
                 </tr>
               </thead>
               <tbody>
@@ -718,11 +825,14 @@ export default function DashboardPage() {
                     <td className="px-2 py-2 text-right text-warning">
                       {formatNumber(row.gross_adverse_slippage_cost_usd, 2)}
                     </td>
+                    <td className="px-2 py-2 text-right text-cyan">
+                      {formatNumber(Number(row.average_hold_seconds ?? 0) / 3600, 2)}h
+                    </td>
                   </tr>
                 ))}
                 {(summary?.strategy_breakdown ?? []).length === 0 ? (
                   <tr className="border-t border-white/10">
-                    <td colSpan={5} className="px-2 py-4 text-center text-muted">
+                    <td colSpan={6} className="px-2 py-4 text-center text-muted">
                       No attributed fills yet.
                     </td>
                   </tr>
@@ -759,6 +869,10 @@ export default function DashboardPage() {
                   <span>slip {formatNumber(row.average_adverse_slippage_bps, 2)} bps</span>
                   <span>underfill {formatCompact(row.gross_underfill_notional_usd)} USDT</span>
                 </div>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-muted">
+                  <span>hold {formatNumber(Number(row.average_hold_seconds ?? 0) / 3600, 2)}h avg</span>
+                  <span>short {formatCompact(row.short_hold_realized_pnl_usd)} / long {formatCompact(row.long_hold_realized_pnl_usd)}</span>
+                </div>
               </div>
             ))}
             {(summary?.strategy_breakdown ?? []).length === 0 ? (
@@ -780,6 +894,7 @@ export default function DashboardPage() {
                   <th className="px-2 py-2 text-left font-normal">STRATEGY</th>
                   <th className="px-2 py-2 text-right font-normal">FILL</th>
                   <th className="px-2 py-2 text-right font-normal">SLIP</th>
+                  <th className="px-2 py-2 text-right font-normal">HOLD</th>
                   <th className="px-2 py-2 text-right font-normal">PNL</th>
                 </tr>
               </thead>
@@ -795,6 +910,7 @@ export default function DashboardPage() {
                     <td className="px-2 py-2 text-secondary">{alert.source_strategy}</td>
                     <td className="px-2 py-2 text-right text-warning">{formatNumber(Number(alert.fill_ratio) * 100, 1)}%</td>
                     <td className="px-2 py-2 text-right text-warning">{formatNumber(alert.slippage_bps, 2)} bps</td>
+                    <td className="px-2 py-2 text-right text-cyan">{formatNumber(Number(alert.average_hold_seconds ?? 0) / 3600, 2)}h</td>
                     <td className={`px-2 py-2 text-right ${Number(alert.realized_pnl_usd) >= 0 ? "text-profit" : "text-loss"}`}>
                       {formatNumber(alert.realized_pnl_usd, 2)}
                     </td>
@@ -802,7 +918,7 @@ export default function DashboardPage() {
                 ))}
                 {(summary?.lineage_alerts ?? []).length === 0 ? (
                   <tr className="border-t border-white/10">
-                    <td colSpan={5} className="px-2 py-4 text-center text-muted">
+                    <td colSpan={6} className="px-2 py-4 text-center text-muted">
                       No active replacement alerts.
                     </td>
                   </tr>
@@ -835,6 +951,15 @@ export default function DashboardPage() {
               <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
                 <div className="text-muted">Worst slippage</div>
                 <div className="mt-1 text-xl text-secondary">{formatNumber(summary?.lineage_summary?.worst_slippage_bps, 2)} bps</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/25 px-3 py-2">
+                <div className="text-muted">Lot hold cohort</div>
+                <div className="mt-1 text-xl text-primary">
+                  {formatNumber(Number(summary?.hold_summary?.average_hold_seconds ?? 0) / 3600, 2)}h
+                </div>
+                <div className="mt-1 text-[11px] text-muted">
+                  short {formatCompact(summary?.hold_summary?.short_hold_realized_pnl_usd)} / long {formatCompact(summary?.hold_summary?.long_hold_realized_pnl_usd)}
+                </div>
               </div>
               <div className="rounded border border-white/10 bg-black/25 px-3 py-2 text-secondary">
                 Replacement alerts trigger on fill ratio below 90% or slippage above 5 bps.

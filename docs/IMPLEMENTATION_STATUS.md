@@ -15,6 +15,7 @@ This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migratio
 - Frontend app route guard validates the HttpOnly cookie session through `/auth/me`.
 - Bybit public REST market-data ingestion for Spot symbols and candles.
 - Bybit public WebSocket market-data streaming foundation with owner-controlled start/stop/status endpoints.
+- Dashboard price stream now uses persisted Bybit candle-close series, with stale-candle refresh on the `/api/market-data/candles` read path and operator-side symbol/timeframe switching.
 - Orderbook top-of-book snapshots from Bybit depth-delta streams.
 - Funding-rate and open-interest polling snapshots from Bybit linear public endpoints.
 - In-memory orderbook ladder reconstruction with derived spread, imbalance, and 0.5% liquidity-depth metrics.
@@ -38,6 +39,9 @@ This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migratio
 - Risk-gate consumption of persisted spot exposure state for open-position and total-exposure enforcement.
 - Per-order cumulative fill-state persistence to prevent duplicate partial-fill events from double-counting symbol exposure.
 - Persisted mark-to-market spot position state with realized and unrealized PnL fields refreshed from market snapshots.
+- FIFO lot-level spot position accounting through persisted `spot_position_lots`, used to compute realized PnL from actual open lots instead of only blended average-entry state.
+- Per-fill lot-close audit trail through persisted `spot_execution_fill_lot_closes`, so each closing fill can be traced to the lots it consumed and the realized PnL per consumed lot slice.
+- Chain-level FIFO lot-close review API and operator UI, including weighted entry/exit prices and hold-to-close timing from persisted lot lifecycle timestamps.
 - Execution-intent cancel/replace lineage for pre-dispatch intents with parent/replacement linkage and fresh risk re-evaluation.
 - Venue-aware cancel path for `dispatching` execution intents with `cancel_requested` lifecycle support and adapter-backed cancellation.
 - Persisted per-fill execution ledger for symbol-level journal and close-sequence accounting.
@@ -84,4 +88,4 @@ This tracks AIQ-BOT v2.1 blueprint coverage during the Binance-to-Bybit migratio
 
 ## Next Blueprint Gate
 
-Phase 1 now includes Bybit REST/WebSocket ingestion, futures-context polling, in-memory orderbook reconstruction, historical orderbook snapshot storage, strategy/risk/execution foundations, venue-native private-stream reconciliation, synced balances and positions, partial-fill dedupe, mark-to-market PnL, cancel/replace lifecycle, journal-grade fill ledger, strategy-attributed journal and execution-quality reads, venue diagnostics, first-pass execution-cost analytics, dashboard/operator exports, scheduled digest reporting, digest anomaly scoring, persisted digest run logs, and digest trend analytics in the dashboard. The next blueprint gate is execution hardening and accounting depth: richer Bybit venue control, stronger lot-level close accounting, and then the research/validation pipeline.
+Phase 1 now includes Bybit REST/WebSocket ingestion, futures-context polling, in-memory orderbook reconstruction, historical orderbook snapshot storage, strategy/risk/execution foundations, venue-native private-stream reconciliation, synced balances and positions, partial-fill dedupe, mark-to-market PnL, cancel/replace lifecycle, journal-grade fill ledger, strategy-attributed journal and execution-quality reads, venue diagnostics, first-pass execution-cost analytics, chain-level FIFO lot-close and hold-time review, dashboard/operator exports, scheduled digest reporting, digest anomaly scoring, persisted digest run logs, and digest trend analytics in the dashboard. The next blueprint gate is execution hardening and accounting depth: richer Bybit venue control, stronger lot-level close accounting, and then the research/validation pipeline.

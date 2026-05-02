@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from typing import cast
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -9,7 +10,9 @@ from app.models import (
     MarketSnapshot,
     SpotAccountBalance,
     SpotExecutionFill,
+    SpotExecutionFillLotClose,
     SpotOrderFillState,
+    SpotPositionLot,
     SpotSymbolPosition,
     Symbol,
 )
@@ -55,6 +58,92 @@ async def estimate_symbol_mark_price(session: AsyncSession, symbol: str) -> Deci
 
 
 class SpotAccountStateService:
+    @staticmethod
+    def _lot_sort_key(lot: SpotPositionLot) -> tuple[datetime, int]:
+        return (lot.opened_at, int(lot.id or 0))
+
+    async def list_open_lots(
+        self,
+        session: AsyncSession,
+        *,
+        symbol: str,
+    ) -> list[SpotPositionLot]:
+        if hasattr(session, "position_lots"):
+            lots = list(getattr(session, "position_lots").get(symbol, []))
+            return sorted(lots, key=lambda item: (item.opened_at, int(item.id or 0)))
+        result = await session.scalars(
+            select(SpotPositionLot)
+            .where(SpotPositionLot.symbol == symbol, SpotPositionLot.remaining_quantity > Decimal("0"))
+            .order_by(SpotPositionLot.opened_at.asc(), SpotPositionLot.id.asc())
+        )
+        return list(result.all())
+
+    @staticmethod
+    def recompute_open_lot_state(lots: list[SpotPositionLot]) -> tuple[Decimal, Decimal | None, Decimal]:
+        active_lots = [lot for lot in lots if lot.remaining_quantity > Decimal("0")]
+        net_quantity = sum((lot.remaining_quantity for lot in active_lots), Decimal("0"))
+        if net_quantity == Decimal("0"):
+            return Decimal("0"), None, Decimal("0")
+        total_cost = sum((lot.entry_price * lot.remaining_quantity for lot in active_lots), Decimal("0"))
+        average_entry_price = total_cost / net_quantity
+        return net_quantity, average_entry_price, total_cost
+
+    async def append_open_lot(
+        self,
+        session: AsyncSession,
+        *,
+        symbol: str,
+        execution_intent_id: int | None,
+        source_strategy: str | None,
+        client_order_id: str | None,
+        venue_order_id: str | None,
+        entry_price: Decimal,
+        quantity: Decimal,
+    ) -> SpotPositionLot:
+        lot = SpotPositionLot(
+            symbol=symbol,
+            execution_intent_id=execution_intent_id,
+            source_strategy=source_strategy,
+            client_order_id=client_order_id,
+            venue_order_id=venue_order_id,
+            opened_at=datetime.now(tz=timezone.utc),
+            closed_at=None,
+            entry_price=entry_price,
+            original_quantity=quantity,
+            remaining_quantity=quantity,
+            source_event="executionReport",
+        )
+        session.add(lot)
+        await session.flush()
+        return lot
+
+    @staticmethod
+    def consume_open_lots(
+        lots: list[SpotPositionLot],
+        *,
+        exit_price: Decimal,
+        quantity: Decimal,
+    ) -> tuple[Decimal, Decimal, list[tuple[SpotPositionLot, Decimal, Decimal]]]:
+        remaining = quantity
+        realized_pnl_delta = Decimal("0")
+        quantity_closed = Decimal("0")
+        allocations: list[tuple[SpotPositionLot, Decimal, Decimal]] = []
+        for lot in lots:
+            if remaining <= Decimal("0"):
+                break
+            if lot.remaining_quantity <= Decimal("0"):
+                continue
+            consumed = min(lot.remaining_quantity, remaining)
+            lot_realized = (exit_price - lot.entry_price) * consumed
+            realized_pnl_delta += lot_realized
+            lot.remaining_quantity -= consumed
+            quantity_closed += consumed
+            remaining -= consumed
+            allocations.append((lot, consumed, lot_realized))
+            if lot.remaining_quantity == Decimal("0"):
+                lot.closed_at = datetime.now(tz=timezone.utc)
+        return quantity_closed, realized_pnl_delta, allocations
+
     async def refresh_position_mark(
         self,
         session: AsyncSession,
@@ -102,6 +191,14 @@ class SpotAccountStateService:
         venue_order_id: str | None,
     ) -> SpotOrderFillState | None:
         if client_order_id is None and venue_order_id is None:
+            return None
+        if hasattr(session, "fill_states"):
+            fill_states = cast(dict[str, SpotOrderFillState], getattr(session, "fill_states"))
+            for state in fill_states.values():
+                if client_order_id is not None and state.client_order_id == client_order_id:
+                    return state
+                if venue_order_id is not None and state.venue_order_id == venue_order_id:
+                    return state
             return None
 
         conditions = []
@@ -282,28 +379,48 @@ class SpotAccountStateService:
         price = (last_quote_quantity / last_quantity) if last_quantity != Decimal("0") else Decimal("0")
         side_normalized = side.upper()
         realized_pnl_delta = Decimal("0")
-        if side_normalized == "BUY":
-            new_quantity = position.net_quantity + last_quantity
-            existing_cost = (position.average_entry_price or Decimal("0")) * position.net_quantity
-            incoming_cost = price * last_quantity
-            position.net_quantity = new_quantity
-            position.average_entry_price = (
-                (existing_cost + incoming_cost) / new_quantity if new_quantity != Decimal("0") else None
+        lot_allocations: list[tuple[SpotPositionLot, Decimal, Decimal]] = []
+        open_lots = await self.list_open_lots(session, symbol=symbol)
+        if not open_lots and position.net_quantity > Decimal("0") and position.average_entry_price is not None:
+            open_lots.append(
+                await self.append_open_lot(
+                    session,
+                    symbol=symbol,
+                    execution_intent_id=None,
+                    source_strategy="bootstrap",
+                    client_order_id=None,
+                    venue_order_id=None,
+                    entry_price=position.average_entry_price,
+                    quantity=position.net_quantity,
+                )
             )
-            position.quote_exposure_usd = (position.average_entry_price or Decimal("0")) * new_quantity
+        if side_normalized == "BUY":
+            open_lots.append(
+                await self.append_open_lot(
+                    session,
+                    symbol=symbol,
+                    execution_intent_id=execution_intent_id,
+                    source_strategy=source_strategy,
+                    client_order_id=client_order_id,
+                    venue_order_id=venue_order_id,
+                    entry_price=price,
+                    quantity=last_quantity,
+                )
+            )
+            position.net_quantity, position.average_entry_price, position.quote_exposure_usd = (
+                self.recompute_open_lot_state(open_lots)
+            )
         else:
-            quantity_closed = min(position.net_quantity, last_quantity)
-            remaining_quantity = position.net_quantity - last_quantity
-            entry_price = position.average_entry_price or Decimal("0")
-            position.net_quantity = remaining_quantity if remaining_quantity > Decimal("0") else Decimal("0")
+            quantity_closed, realized_pnl_delta, lot_allocations = self.consume_open_lots(
+                open_lots,
+                exit_price=price,
+                quantity=last_quantity,
+            )
             position.realized_notional += last_quote_quantity
-            realized_pnl_delta = (price - entry_price) * quantity_closed
             position.realized_pnl_usd += realized_pnl_delta
-            if position.net_quantity == Decimal("0"):
-                position.average_entry_price = None
-                position.quote_exposure_usd = Decimal("0")
-            else:
-                position.quote_exposure_usd = (position.average_entry_price or Decimal("0")) * position.net_quantity
+            position.net_quantity, position.average_entry_price, position.quote_exposure_usd = (
+                self.recompute_open_lot_state(open_lots)
+            )
 
         position.updated_at = datetime.now(tz=timezone.utc)
         position.source_event = "executionReport"
@@ -325,6 +442,20 @@ class SpotAccountStateService:
             source_event="executionReport",
         )
         session.add(execution_fill)
+        await session.flush()
+        for lot, closed_quantity, realized_pnl in lot_allocations:
+            session.add(
+                SpotExecutionFillLotClose(
+                    execution_fill_id=int(execution_fill.id),
+                    position_lot_id=int(lot.id),
+                    symbol=symbol,
+                    closed_quantity=closed_quantity,
+                    lot_entry_price=lot.entry_price,
+                    fill_exit_price=price,
+                    realized_pnl_usd=realized_pnl,
+                    closed_at=datetime.now(tz=timezone.utc),
+                )
+            )
         await session.flush()
         return position
 

@@ -36,6 +36,17 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def startup_background_services() -> None:
         await reports.digest_service.start()
+        if not market_data.stream_service.status().running:
+            symbols = [
+                symbol.strip().upper()
+                for symbol in settings.market_stream_autostart_symbols.split(",")
+                if symbol.strip()
+            ]
+            if symbols:
+                try:
+                    await market_data.stream_service.start(symbols, settings.market_stream_autostart_interval)
+                except Exception:
+                    pass
 
     @app.on_event("shutdown")
     async def shutdown_market_stream() -> None:

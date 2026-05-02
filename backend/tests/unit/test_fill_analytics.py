@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.models import ExecutionIntent, SpotExecutionFill
+from app.models import ExecutionIntent, SpotExecutionFill, SpotExecutionFillLotClose
 from services.execution.fill_analytics import (
+    parse_order_chain_key,
+    summarize_chain_lot_closes,
     summarize_fill_chains,
     summarize_fill_quality,
     summarize_intent_lineage_outcomes,
@@ -397,3 +399,94 @@ def test_summarize_intent_lineage_outcomes_rolls_replacements_into_root_chain() 
     assert lineage.adverse_slippage_bps.quantize(Decimal("0.0001")) == Decimal("30.8642")
     assert lineage.slippage_cost_usd.quantize(Decimal("0.0001")) == Decimal("1.6000")
     assert lineage.underfill_notional_usd == Decimal("0")
+
+
+def test_parse_order_chain_key_supports_client_venue_and_fill() -> None:
+    assert parse_order_chain_key("client:abc-1") == ("client", "abc-1")
+    assert parse_order_chain_key("venue:oid-9") == ("venue", "oid-9")
+    assert parse_order_chain_key("fill:42") == ("fill", 42)
+    assert parse_order_chain_key("fill:not-a-number") is None
+    assert parse_order_chain_key("broken") is None
+
+
+def test_summarize_chain_lot_closes_rolls_up_fifo_closures() -> None:
+    fills = [
+        build_fill(
+            fill_id=10,
+            client_order_id="client-close",
+            symbol="BTCUSDT",
+            side="SELL",
+            quantity="0.10",
+            quote_quantity="6600",
+            price="66000",
+            realized_pnl_usd="600",
+            post_fill_net_quantity="0.05",
+            filled_at_second=10,
+            execution_intent_id=44,
+            source_strategy="orderbook_imbalance",
+        ),
+        build_fill(
+            fill_id=11,
+            client_order_id="client-close",
+            symbol="BTCUSDT",
+            side="SELL",
+            quantity="0.05",
+            quote_quantity="3325",
+            price="66500",
+            realized_pnl_usd="50",
+            post_fill_net_quantity="0.00",
+            filled_at_second=11,
+            execution_intent_id=44,
+            source_strategy="orderbook_imbalance",
+        ),
+    ]
+    lot_closes = [
+        SpotExecutionFillLotClose(
+            id=1,
+            execution_fill_id=10,
+            position_lot_id=100,
+            symbol="BTCUSDT",
+            closed_quantity=Decimal("0.10"),
+            lot_entry_price=Decimal("60000"),
+            fill_exit_price=Decimal("66000"),
+            realized_pnl_usd=Decimal("600"),
+            closed_at=datetime(2026, 5, 1, 0, 0, 10, tzinfo=timezone.utc),
+        ),
+        SpotExecutionFillLotClose(
+            id=2,
+            execution_fill_id=11,
+            position_lot_id=101,
+            symbol="BTCUSDT",
+            closed_quantity=Decimal("0.05"),
+            lot_entry_price=Decimal("65500"),
+            fill_exit_price=Decimal("66500"),
+            realized_pnl_usd=Decimal("50"),
+            closed_at=datetime(2026, 5, 1, 0, 0, 11, tzinfo=timezone.utc),
+        ),
+    ]
+
+    summary = summarize_chain_lot_closes("client:client-close", fills, lot_closes)
+
+    assert summary is not None
+    assert summary.chain_key == "client:client-close"
+    assert summary.fills_count == 2
+    assert summary.lot_slices_count == 2
+    assert summary.lots_count == 2
+    assert summary.total_closed_quantity == Decimal("0.15")
+    assert summary.total_realized_pnl_usd == Decimal("650")
+    assert summary.weighted_average_entry_price == Decimal("61833.33333333333333333333333")
+    assert summary.weighted_average_exit_price == Decimal("66166.66666666666666666666667")
+
+    summary_with_holds = summarize_chain_lot_closes(
+        "client:client-close",
+        fills,
+        lot_closes,
+        {
+            100: datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            101: datetime(2026, 5, 1, 0, 0, 5, tzinfo=timezone.utc),
+        },
+    )
+
+    assert summary_with_holds is not None
+    assert summary_with_holds.average_hold_seconds == Decimal("8")
+    assert summary_with_holds.max_hold_seconds == Decimal("10")
