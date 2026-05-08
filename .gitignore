@@ -1,19 +1,42 @@
-.env
-.env.*
-!.env.example
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.venv/
-*.egg-info/
-.codex
+```
+# Dependencies
 node_modules/
-.next/
-*.tsbuildinfo
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
 dist/
-coverage/
+build/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
 *.log
-ops/certs/
-backend/var/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Python cache
+.mypy_cache/
+.pytest_cache/
+```
